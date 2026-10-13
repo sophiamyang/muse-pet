@@ -1,24 +1,24 @@
 # Muse Pet
 
-A hand-tracked desktop pet in the browser: the fuzzy Muse mascot (three.js, strand-fur shading) reacting to your webcam hand via MediaPipe. Pet it, point and it follows your finger, pinch to carry it, and hold up gestures (👍 ✌️ 🤟 👎 ✊ ✋) for reactions.
+A hand-tracked desktop pet in the browser: the fuzzy Muse mascot (three.js, strand-fur shading) reacting to your webcam hand via MediaPipe.
 
-## Run
-
-Double-click `start.command` (serves the folder on `localhost:8765` and opens the page), or open `index.html` directly in Chrome. Click **Start camera** (or **Use mouse**).
+**Try it:** https://sophiamyang.github.io/muse-pet/ (or open `index.html` in Chrome). Click **Start camera**, or **Use mouse**.
 
 ## Gestures
 
 | Gesture | Reaction |
 |---|---|
-| Open hand stroking over Muse | Petting (body, chin scratch, head pat): squish, purr, hearts |
+| 🖐 Stroke over Muse with an open hand | Petting: squish, purr, hearts (chin scratch and head pat have their own reactions) |
 | ☝️ Point | Walks along the floor to stand under your fingertip |
-| ☝️ Point above its head, hold | Jumps to reach |
-| 🤏 Pinch over it | Pick up and carry; open fingers to drop |
-| 👍 / ✌️ / 🤟 / 👎 (hold) | Dance / pose + wink / hearts / sulk |
-| ✊ (hold) | Sit and stay |
-| ✋ (hold) | High-five; push forward to clap |
-| Wave · finger near face · push toward camera · fast swipe | Wave back · swat · startle · pounce |
-| Leave it alone ~20 s | Naps (Zzz), wakes when you return |
+| 🤏 Pinch over it | Pick up and carry; open your fingers to drop |
+| 👍 hold | Happy dance |
+| ✌️ hold | Strikes a pose and winks |
+| 🤟 hold | Burst of hearts |
+| ✋ hold still | High-five; push your palm forward to clap |
+| 👋 Wave (not over Muse) | Waves back |
+| Leave it alone ~20 s | Naps, wakes when you return |
+
+Held gestures trigger after about half a second of holding still, with the palm facing the camera.
 
 Mouse: drag to pet, click to poke, shift-drag to carry, double-click the floor to walk there, right-drag to orbit. Keys: `V` camera preview, `S` sound, `H` hide UI.
 

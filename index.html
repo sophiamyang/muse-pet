@@ -58,7 +58,7 @@
 <canvas id="fx"></canvas>
 <video id="cam" class="off" playsinline muted></video>
 <div id="panelUI" class="card"><div class="row">input <b id="pInput">—</b></div><div class="row">hand <b id="pHand">—</b></div><div class="row">gesture <b id="pGest">—</b></div><div class="row">mood <b id="pMood">idle</b></div><div id="meter"><i id="pMeter"></i></div></div>
-<div id="keys" class="card"><b>Pet:</b> stroke with an open hand (chin &amp; head too) · <b>☝️ point</b> and Muse follows your finger · <b>pinch</b> to pick up &amp; carry, open to drop<br><b>Hold still:</b> 👍 dance · ✌️ pose · 🤟 love · 👎 sulk · ✊ stay · ✋ high-five (push forward to clap) · wave hi · poke toward the camera<br><b>Mouse:</b> drag to pet · click to poke · shift-drag to carry · double-click the floor to walk there · right-drag to orbit &nbsp; <kbd>V</kbd> camera <kbd>S</kbd> sound <kbd>H</kbd> hide UI</div>
+<div id="keys" class="card"><b>🖐 Stroke</b> with an open hand to pet (chin &amp; head too) · <b>☝️ Point</b> and Muse follows · <b>🤏 Pinch</b> to carry, open to drop<br><b>Hold still:</b> 👍 dance · ✌️ pose · 🤟 hearts · ✋ high-five (push forward to clap) · <b>👋 Wave</b> and it waves back<br><b>Mouse:</b> drag to pet · click to poke · shift-drag to carry · double-click the floor to walk there · right-drag to orbit &nbsp; <kbd>V</kbd> camera <kbd>S</kbd> sound <kbd>H</kbd> hide UI</div>
 <div id="start"><div class="card"><h2>Say hi to Muse</h2><p>Uses your webcam and MediaPipe hand tracking; video never leaves your browser. Pet it, wave at it, poke it, or leave it alone and it'll nap.</p><button class="pri" id="bCam">Start camera</button><button id="bMouse">Use mouse</button></div></div>
 <div id="toast" class="card"></div>
 <script type="module">
@@ -598,8 +598,6 @@ function makeBrain(ctx) {
       if (s.hand && reversals.length >= 3 && waveCD <= 0 && !s.grabbing) { start('wave', 1.8); meow(1.1, 0.4); waveCD = 3; reversals = []; }
       const d = Math.hypot(s.curPt.x - hs.x, s.curPt.y - hs.y);               // swat: hovering near the face
       nearT = d < Math.max(hs.r * 1.9, innerHeight * 0.12) && s.speed < 0.8 ? nearT + dt : Math.max(0, nearT - dt);
-      if (nearT > 0.9 && swatCD <= 0 && (!act || act.name !== 'wave')) { start('swat', 0.55, { side: s.curPt.x > hs.x ? 1 : -1 }); swatCD = 2.2; nearT = 0; blip(300, 900, 0.1, 'triangle', 0.08); }
-      if (s.speed > 1.7 && pounceCD <= 0 && !act) { start('wiggle', 0.9); pounceCD = 5; } // pounce prep
     } else { lastSign = 0; nearT = 0; }
 
     // ---------- sleep ----------
@@ -743,14 +741,14 @@ function shape(h) {
 const _pl = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), _pv = new THREE.Vector3();
 function planeAt(x, y) { ndc.set(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1); rc.setFromCamera(ndc, camera); return rc.ray.intersectPlane(_pl, _pv) ? _pv.clone() : null; }
 const XMAX = () => Math.max(0, camera.position.z * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect - 0.42);
-const POSE_EMOJI = { Thumb_Up: '👍 thumbs up', Victory: '✌️ peace', ILoveYou: '🤟 love you', Closed_Fist: '✊ fist', Open_Palm: '✋ open palm', Pointing_Up: '☝️ pointing', Thumb_Down: '👎 thumbs down', Point: '☝️ pointing' };
+const POSE_EMOJI = { Thumb_Up: '👍 thumbs up', Victory: '✌️ peace', ILoveYou: '🤟 love you', Open_Palm: '✋ open palm', Pointing_Up: '☝️ pointing', Point: '☝️ pointing' };
 const P = { x: 0, vx: 0, heading: 0, walk: 0, phase: 0 };
-let targetX = 0, followLast = -1e9, reachT = 0, curShape = null;
+let targetX = 0, followLast = -1e9, curShape = null, strokeT = 0;
 const carry = { on: false, x: 0, y: 0, vx: 0, drop: false, dv: 0, swing: new Spring(30, 3) };
 let pose = null, poseCand = null, poseHeld = 0, poseCD = 0;
 function startPose(name) {
   pose = { name, t: 0, grace: 0 }; poseCD = 1.2; poseCand = null; poseHeld = 0;
-  ({ Thumb_Up: () => meow(1.25, 0.35), Victory: () => blip(2400, 1200, 0.06, 'square', 0.06), ILoveYou: () => meow(1.35, 0.5), Thumb_Down: () => meow(0.7, 0.55, 0.1), Closed_Fist: () => mrrp(), Open_Palm: () => mrrp() }[name] || (() => {}))();
+  ({ Thumb_Up: () => meow(1.25, 0.35), Victory: () => blip(2400, 1200, 0.06, 'square', 0.06), ILoveYou: () => meow(1.35, 0.5), Open_Palm: () => mrrp() }[name] || (() => {}))();
 }
 function endPose() { pose = null; poseCD = 0.8; }
 function clap() { blip(1900, 900, 0.05, 'square', 0.09); setTimeout(() => blip(1700, 800, 0.05, 'square', 0.07), 70); for (let i = 0; i < 8; i++) setTimeout(burstHeart, i * 40); }
@@ -827,10 +825,13 @@ renderer.setAnimationLoop(() => {
     cur = toScreen(hand[8]);
     for (const i of [8, 12, 16, 9]) { const p = toScreen(hand[i]); const h = hitAt(p.x, p.y); if (h) { touching = true; touchPt = touchPt || h.point; } }
     curShape = shape(hand);
-    pressing = touching && !pinch && !curShape.pointing;
+    const POSE_NAMES = ['Thumb_Up', 'Victory', 'ILoveYou'];
+    const strokeOK = touching && !pinch && curShape.open && !curShape.pointing && !POSE_NAMES.includes(gestNow);
+    if (strokeOK && Math.hypot(vel.x, vel.y) > 0.12) strokeT = 0.35; // moving open hand = stroke; brief pauses keep it going
+    strokeT = Math.max(0, strokeT - dt);
+    pressing = strokeOK && strokeT > 0;
     if (pinch && !grabbing && touching) startGrab('hand');
     if (!pinch && grabSrc === 'hand') endGrab();
-    if (touching && hsRate > 1.5 && !grabbing && !(pose && pose.name === 'Open_Palm')) poke();
   } else {
     hsS = 0; hsRate = 0; pinch = false; if (grabSrc === 'hand') endGrab();
     if (now - mouse.last < 4000) { src = 'mouse'; cur = { x: mouse.x, y: mouse.y }; const h = hitAt(cur.x, cur.y); touching = !!h; touchPt = h?.point || null; pressing = touching && mouse.down && grabSrc !== 'mouse'; }
@@ -870,7 +871,7 @@ renderer.setAnimationLoop(() => {
   let g = hand ? gestNow : 'None';
   if (hand && (g === 'Pointing_Up' || curShape?.pointing)) g = 'Point';
   $('pGest').textContent = hand ? (POSE_EMOJI[g] || (curShape?.open ? '🖐 open hand' : (pinch ? '🤏 pinch' : '—'))) : '—';
-  const POSES = ['Thumb_Up', 'Victory', 'ILoveYou', 'Closed_Fist', 'Open_Palm', 'Thumb_Down'];
+  const POSES = ['Thumb_Up', 'Victory', 'ILoveYou', 'Open_Palm'];
   if (!pose && hand && !pressing && !grabbing && still && POSES.includes(g)) {
     if (poseCand === g) poseHeld += dt; else { poseCand = g; poseHeld = 0; }
     if (poseHeld > 0.45 && poseCD <= 0) startPose(g);
@@ -894,12 +895,6 @@ renderer.setAnimationLoop(() => {
         S.happyArc.t = 1; S.blush.t = 0.95; S.squash.v += dt * 1.5; armS[0].x.t = armS[1].x.t = -0.9; S.tilt.t = Math.sin(pt * 3) * 0.12;
         if (Math.random() < dt * 14) burstHeart();
         if (pt > 2.2) endPose(); break; }
-      case 'Thumb_Down': { // sulk
-        S.hPitch.t = 0.35; S.eye.t = 0.45; S.tilt.t = 0.15; armS[0].x.t = armS[1].x.t = 0.35; S.mouth.t = 0; S.blush.t = 0;
-        if (pt > 2.0) endPose(); break; }
-      case 'Closed_Fist': { // stay: sit and wait
-        sitAmt = 1; armS[0].x.t = armS[1].x.t = -0.45; S.eye.t = 1;
-        if (graceOut('Closed_Fist')) { endPose(); hopV = 1.2; } break; }
       case 'Open_Palm': { // reach up for a high-five; push forward to clap
         const side = cur && cur.x > headScreen().x ? 1 : 0;
         armS[side].x.t = -2.6; armS[side].z.t = 0; S.tilt.t = side ? -0.15 : 0.15; S.dil.t = 0.1;
@@ -913,14 +908,10 @@ renderer.setAnimationLoop(() => {
   if (pointingNow && cur) {
     followLast = now;
     const w = planeAt(cur.x, cur.y); if (w) targetX = clamp(w.x, -XMAX(), XMAX());
-    const hs2 = headScreen(); // point above its head and hold still → it jumps up to reach
-    if (still && cur.y < hs2.y - hs2.r * 1.4 && Math.abs(cur.x - hs2.x) < hs2.r * 2.2) { reachT += dt; if (reachT > 0.5 && hopY === 0) { hopV = 2.7; reachT = -1; mrrp(); } }
-    else if (reachT > 0) reachT = 0;
-  } else reachT = 0;
+  }
   const following = now - followLast < 700;
   if (!hand && now - followLast > 15000 && now - mouse.last > 15000) targetX = 0; // wander home when nobody's around
-  const stay = pose && pose.name === 'Closed_Fist';
-  const dxT = targetX - P.x, want = Math.abs(dxT) > 0.03 && !carry.on && !carry.drop && !stay;
+  const dxT = targetX - P.x, want = Math.abs(dxT) > 0.03 && !carry.on && !carry.drop;
   const maxV = following ? 0.9 : 0.45;
   P.vx = lerp(P.vx, want ? clamp(dxT * 3, -maxV, maxV) : 0, 1 - Math.exp(-dt * 6));
   if (!carry.on) P.x += P.vx * dt;
