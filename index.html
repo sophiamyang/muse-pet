@@ -545,7 +545,7 @@ class Spring { constructor(k, d, x = 0) { this.k = k; this.d = d; this.x = x; th
 function toast(msg, ms = 2600) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._h); toast._h = setTimeout(() => t.classList.remove('on'), ms); }
 
 // ---------- sound: purr + little chirps ----------
-let ac = null, master = null, purrGain = null, muted = false;
+let ac = null, master = null, purrGain = null, muted = false, purrOn = false, purrStart = 0, purrEnd = -1e9;
 function initAudio() {
   if (ac) return;
   ac = new (window.AudioContext || window.webkitAudioContext)();
@@ -783,18 +783,28 @@ function fwSpawn(p, v, life, col, kind) {
   fwPos.set([p.x, p.y, p.z], i * 3); fwVel.set([v.x, v.y, v.z], i * 3); fwLife[i] = fwMax[i] = life; fwKind[i] = kind;
   fwBase.set([col.r, col.g, col.b], i * 3);
 }
-function noiseBurst(dur, freq, vol, q = 0.7) {
+// shaped noise: filter type, start→end cutoff, attack/decay envelope
+function noise({ dur, type = 'lowpass', f0, f1 = f0, q = 0.7, vol, attack = 0.005, at = 0 }) {
   if (!ac || muted) return;
-  const n = ac.currentTime, b = ac.createBuffer(1, Math.ceil(ac.sampleRate * dur), ac.sampleRate), d = b.getChannelData(0);
-  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2.5);
+  const n = ac.currentTime + at, b = ac.createBuffer(1, Math.ceil(ac.sampleRate * dur), ac.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
   const src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
-  src.buffer = b; f.type = 'lowpass'; f.frequency.value = freq; f.Q.value = q; g.gain.value = vol;
-  src.connect(f); f.connect(g); g.connect(master); src.start(n);
+  src.buffer = b; f.type = type; f.Q.value = q;
+  f.frequency.setValueAtTime(f0, n); f.frequency.exponentialRampToValueAtTime(f1, n + dur);
+  g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(vol, n + attack); g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+  src.connect(f); f.connect(g); g.connect(master); src.start(n); src.stop(n + dur + 0.05);
+}
+function thump(at = 0) { // low "boom" body
+  if (!ac || muted) return;
+  const n = ac.currentTime + at, o = ac.createOscillator(), g = ac.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(110, n); o.frequency.exponentialRampToValueAtTime(38, n + 0.45);
+  g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(0.35, n + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, n + 0.6);
+  o.connect(g); g.connect(master); o.start(n); o.stop(n + 0.65);
 }
 function launchFirework(target) {
   const from = new THREE.Vector3(target.x + (Math.random() - 0.5) * 0.3, 0.05, -0.35);
   rockets.push({ p: from, to: target.clone(), t: 0, dur: 0.55, col: FW_COLORS[Math.floor(Math.random() * FW_COLORS.length)] });
-  blip(500, 1700, 0.5, 'sine', 0.05); // whistle
+  noise({ dur: 0.5, type: 'bandpass', f0: 500, f1: 2200, q: 1.4, vol: 0.05, attack: 0.15 }); // soft launch whoosh
 }
 function explode(at, col) {
   const col2 = FW_COLORS[Math.floor(Math.random() * FW_COLORS.length)], n = 230, v = new THREE.Vector3();
@@ -802,8 +812,8 @@ function explode(at, col) {
     v.set(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1).normalize().multiplyScalar(0.75 + Math.random() * 0.45);
     fwSpawn(at, v, 1.2 + Math.random() * 0.7, Math.random() < 0.7 ? col : col2, Math.random() < 0.25 ? 2 : 1);
   }
-  noiseBurst(0.6, 900, 0.5); setTimeout(() => noiseBurst(0.35, 2400, 0.12), 60);
-  for (let k = 0; k < 10; k++) setTimeout(() => noiseBurst(0.04, 4000 + Math.random() * 3000, 0.05, 2), 250 + Math.random() * 900); // crackle
+  thump(); noise({ dur: 0.9, f0: 900, f1: 120, vol: 0.28 }); // boom + rumble tail
+  for (let k = 0; k < 7; k++) noise({ dur: 0.03, type: 'highpass', f0: 2500, vol: 0.03 + Math.random() * 0.03, attack: 0.002, at: 0.3 + Math.random() * 0.8 }); // light crackle
   fwLook = { pt: at.clone(), until: performance.now() + 1800 }; cheer = 1.6; lastBurst = performance.now();
 }
 const _white = new THREE.Color(1, 0.95, 0.8);
@@ -1078,12 +1088,12 @@ renderer.setAnimationLoop(() => {
 
   updateSprites(dt, t);
   updateFireworks(dt);
-  // purr starts as soon as you stroke, grows as Muse gets happier, lingers a little after, and hums softly in its sleep
-  let purr = smooth(0.2, 0.9, pet) * 0.7;
-  if (pressing) purr = Math.max(purr, 0.45 + 0.6 * happy) + (o.purrBoost || 0) * 1.5;
-  if (pose && pose.name === 'ILoveYou') purr = Math.max(purr, 0.7);
-  if (o.asleep) purr = Math.max(purr, 0.18);
-  if (purrGain) purrGain.gain.setTargetAtTime(muted ? 0 : clamp(purr * 1.6, 0, 1.9), ac.currentTime, pressing ? 0.08 : 0.3);
+  // purr: a short purr (~1.5 s) when you start stroking; it rests until you stop and pet again
+  if (pressing) { if (!purrOn && now - purrEnd > 1500) { purrOn = true; purrStart = now; } }
+  if (purrOn && (!pressing || now - purrStart > 1500)) { purrOn = false; purrEnd = now; }
+  if (pressing) purrEnd = Math.max(purrEnd, purrOn ? 0 : now); // keep resting while you keep stroking
+  const purr = purrOn ? (0.35 + 0.35 * happy) * (1 - smooth(1100, 1500, now - purrStart)) : 0;
+  if (purrGain) purrGain.gain.setTargetAtTime(muted ? 0 : purr, ac.currentTime, purrOn ? 0.06 : 0.12);
 
   $('pHand').textContent = hand ? (pinch ? 'pinch' : 'open') : (landmarker ? 'not seen' : '—');
   $('pMood').textContent = o.mood && !grabbing && startled <= 0 && !pressing ? o.mood : grabbing ? 'held' : startled > 0 ? 'startled!' : happy > 0.5 ? 'happy ♥' : pressing ? 'being petted' : cur ? 'curious' : 'idle';
