@@ -578,12 +578,12 @@ function meow(pitch = 1, dur = 0.4, vol = 0.14) { // a soft rising "mew"
 const mrrp = () => meow(1.4, 0.16, 0.1);
 const yawn = () => meow(0.6, 0.9, 0.06);
 
-// ---------- behaviour brain (shared with the cat version) ----------
+// ---------- behaviour brain ----------
 function makeBrain(ctx) {
-  // ctx.headScreen() -> { x, y, r } in px · ctx.emitZ() · ctx.canWalk
+  // ctx.headScreen() -> { x, y, r } in px · ctx.emitZ()
   let act = null, idleIn = 3, noCurT = 0, asleep = false, zIn = 0, nearT = 0, swatCD = 0, pounceCD = 0, waveCD = 0, lastSign = 0, reversals = [];
   const start = (name, dur = 0, extra = {}) => { act = { name, dur, t: 0, ...extra }; };
-  const IDLE = ['look', 'look', 'wash', 'yawn', 'stretch', 'slowblink', 'earflick', 'tailglance', 'headtilt', 'meow', 'knead'].concat(ctx.canWalk ? ['circle', 'circle'] : []);
+  const IDLE = ['look', 'look', 'wash', 'yawn', 'stretch', 'slowblink', 'headtilt', 'meow', 'knead'];
 
   return function think(s) {
     const { dt, t } = s;
@@ -616,28 +616,28 @@ function makeBrain(ctx) {
     }
 
     // ---------- targets ----------
-    const T = { hPitch: 0, hYaw: 0, tilt: 0, torsoX: 0, rigY: 0, rigZ: 0, mouth: 0, eye: 1, happyArc: 0, sleepArc: 0, earBack: 0, dil: s.curPt ? 0.085 : 0.07, blush: 0.4, poof: 1, tailAmp: 0.08, tailRaise: 0.15, walk: 0, walkSpeed: 1 };
+    const T = { hPitch: 0, hYaw: 0, tilt: 0, torsoX: 0, rigY: 0, rigZ: 0, mouth: 0, eye: 1, happyArc: 0, sleepArc: 0, earBack: 0, dil: s.curPt ? 0.085 : 0.07, blush: 0.4, poof: 1 };
     const L = [{ x: 0, z: 0 }, { x: 0, z: 0 }];
-    let tailFreq = 1.2, purrBoost = 0, circle = null;
+    let purrBoost = 0;
     if (s.blink) T.eye = 0.06;
     if (s.curPt && !s.pressing) T.tilt = Math.sin(t * 0.7) * 0.14;
 
     if (s.pressing && s.curPt) {                                                  // petting zones (screen space around the head)
       const dx = (s.curPt.x - hs.x) / hs.r, dy = (s.curPt.y - hs.y) / hs.r, inHead = dx * dx + dy * dy < 1.6;
-      T.happyArc = s.happy; T.blush = 0.35 + 0.5 * s.happy; T.tailRaise = 0.3 + 0.4 * s.happy; T.tailAmp = 0.18;
+      T.happyArc = s.happy; T.blush = 0.35 + 0.5 * s.happy;
       if (inHead && dy > 0.3) { T.hPitch = -0.38; T.happyArc = 1; purrBoost = 0.3; T.tilt = 0.1; }               // chin scratch → looks up
       else if (inHead && dy < -0.2) { T.hPitch = 0.14; T.tilt = clamp(-dx * 0.25, -0.3, 0.3); T.earBack = 0.35; T.happyArc = 1; } // head pat → leans in
       else { T.hYaw = clamp(dx * 0.08, -0.3, 0.3); T.tilt = clamp(-dx * 0.08, -0.25, 0.25); }                    // body → nuzzles toward you
       if (s.happy > 0.7) { L[0].x = -0.28 * (0.5 + 0.5 * Math.sin(t * 7)); L[1].x = -0.28 * (0.5 + 0.5 * Math.sin(t * 7 + Math.PI)); } // making biscuits
     }
-    if (s.grabbing) { T.earBack = 0.55; T.dil = 0.1; T.tailAmp = 0.35; tailFreq = 5.5; T.tailRaise = 0.3; L[0].x = 0.25 + Math.sin(t * 5) * 0.2; L[1].x = 0.25 + Math.sin(t * 5 + 1.5) * 0.2; }
-    if (s.startled > 0) { T.earBack = 1; T.eye = 1.15; T.dil = 0.105; T.mouth = 0.35; T.poof = 1.9; T.tailRaise = 1; T.tailAmp = 0.04; tailFreq = 3; }
+    if (s.grabbing) { T.earBack = 0.55; T.dil = 0.1; L[0].x = 0.25 + Math.sin(t * 5) * 0.2; L[1].x = 0.25 + Math.sin(t * 5 + 1.5) * 0.2; }
+    if (s.startled > 0) { T.earBack = 1; T.eye = 1.15; T.dil = 0.105; T.mouth = 0.35; T.poof = 1.9; }
     else if (s.grabbing) T.poof = 1.25;
     if (s.hello > 0.9) T.mouth = 0.6 * Math.sin((1.3 - s.hello) / 0.4 * Math.PI);
-    if (s.hello > 0) { T.tailRaise = 0.9; T.earBack = -0.15; }
+    if (s.hello > 0) { T.earBack = -0.15; }
 
     if (asleep) {
-      T.sleepArc = 1; T.eye = 0.02; T.hPitch = 0.32 + Math.sin(t * 0.9) * 0.04; T.tilt = 0.18; T.torsoX = 0.05; T.tailAmp = 0.02; T.earBack = 0.2;
+      T.sleepArc = 1; T.eye = 0.02; T.hPitch = 0.32 + Math.sin(t * 0.9) * 0.04; T.tilt = 0.18; T.torsoX = 0.05; T.earBack = 0.2;
       zIn -= dt; if (zIn < 0) { ctx.emitZ(); zIn = 1.3; }
     }
 
@@ -645,25 +645,22 @@ function makeBrain(ctx) {
     if (act) {
       act.t += dt; const a = act, p = a.dur ? a.t / a.dur : 0, env = Math.sin(Math.min(1, p) * Math.PI);
       switch (a.name) {
-        case 'wave': { const up = smooth(0, 0.15, p) * (1 - smooth(0.85, 1, p)); L[1].x = -2.8 * up; L[1].z = (0.4 + Math.sin(a.t * 13) * 0.3) * up; T.tilt = 0.22 * env; T.tailRaise = 0.8; if (p < 0.3) T.mouth = 0.5 * Math.sin(p / 0.3 * Math.PI); break; }
+        case 'wave': { const up = smooth(0, 0.15, p) * (1 - smooth(0.85, 1, p)); L[1].x = -2.8 * up; L[1].z = (0.4 + Math.sin(a.t * 13) * 0.3) * up; T.tilt = 0.22 * env; if (p < 0.3) T.mouth = 0.5 * Math.sin(p / 0.3 * Math.PI); break; }
         case 'swat': { const i = a.side > 0 ? 1 : 0; L[i].x = -1.7 * env; L[i].z = a.side * 0.5 * env; T.dil = 0.11; T.earBack = 0.3; T.hYaw = a.side * -0.2 * env; break; }
-        case 'wiggle': T.torsoX = 0.16; T.hPitch = 0.12; T.dil = 0.115; T.rigY = -0.03; T.tailAmp = 0.12; tailFreq = 7; T.earBack = -0.1; if (a.t > a.dur) start('pounce', 0.65); break;
-        case 'pounce': T.rigZ = 0.38 * env; T.rigY = 0.28 * env; L[0].x = L[1].x = -1.3 * env; T.dil = 0.11; T.walk = 1; T.walkSpeed = 2.4; if (a.t > a.dur) { act = null; mrrp(); } break;
+        case 'wiggle': T.torsoX = 0.16; T.hPitch = 0.12; T.dil = 0.115; T.rigY = -0.03; T.earBack = -0.1; if (a.t > a.dur) start('pounce', 0.65); break;
+        case 'pounce': T.rigZ = 0.38 * env; T.rigY = 0.28 * env; L[0].x = L[1].x = -1.3 * env; T.dil = 0.11;  if (a.t > a.dur) { act = null; mrrp(); } break;
         case 'wash': { if (!a.dur) a.dur = 2.6; const up = smooth(0, 0.18, p) * (1 - smooth(0.85, 1, p)); L[0].x = -2.55 * up + Math.sin(a.t * 10) * 0.12 * up; L[0].z = 0.35 * up; T.hPitch = 0.28 * up; T.hYaw = -0.22 * up; T.eye = 1 - 0.7 * up; T.mouth = 0.2 * up * (0.5 + 0.5 * Math.sin(a.t * 10)); break; }
         case 'yawn': { if (!a.dur) { a.dur = 1.7; yawn(); } T.mouth = 1.05 * Math.pow(env, 0.7); T.eye = 1 - 0.95 * env; T.hPitch = -0.28 * env; T.earBack = 0.45 * env; T.tilt = 0.08 * env; break; }
-        case 'stretch': { if (!a.dur) { a.dur = 2.0; yawn(); } T.torsoX = 0.3 * env; L[0].x = L[1].x = -0.85 * env; T.tailRaise = 0.9 * env; T.hPitch = -0.12 * env; T.eye = 1 - 0.8 * env; if (p > 0.25 && p < 0.8) T.mouth = 0.8 * Math.sin((p - 0.25) / 0.55 * Math.PI); break; }
+        case 'stretch': { if (!a.dur) { a.dur = 2.0; yawn(); } T.torsoX = 0.3 * env; L[0].x = L[1].x = -0.85 * env; T.hPitch = -0.12 * env; T.eye = 1 - 0.8 * env; if (p > 0.25 && p < 0.8) T.mouth = 0.8 * Math.sin((p - 0.25) / 0.55 * Math.PI); break; }
         case 'slowblink': { if (!a.dur) a.dur = 1.6; T.eye = 1 - 0.96 * env; T.blush = 0.65; T.tilt = 0.12 * env; break; }
-        case 'earflick': { if (!a.dur) { a.dur = 0.4; ctx.earFlick?.(); } break; }
-        case 'tailglance': { if (!a.dur) a.dur = 1.8; T.hYaw = 0.75 * env; T.hPitch = 0.25 * env; T.tailAmp = 0.25; tailFreq = 6; T.dil = 0.1; break; }
         case 'headtilt': { if (!a.dur) { a.dur = 1.6; a.side = Math.random() < 0.5 ? -1 : 1; } T.tilt = 0.38 * a.side * env; T.earBack = -0.15 * env; break; }
         case 'meow': { if (!a.dur) { a.dur = 0.55; meow(1 + Math.random() * 0.25, 0.45); } T.mouth = 0.65 * env; T.hPitch = -0.1 * env; break; }
         case 'knead': { if (!a.dur) a.dur = 2.4; L[0].x = -0.28 * (0.5 + 0.5 * Math.sin(a.t * 7)) * env; L[1].x = -0.28 * (0.5 + 0.5 * Math.sin(a.t * 7 + Math.PI)) * env; T.happyArc = 0.8 * env; T.blush = 0.6; break; }
         case 'look': { if (!a.dur) { a.dur = 2.2; a.y = (Math.random() - 0.5) * 1.1; a.p = (Math.random() - 0.6) * 0.3; } T.hYaw = a.y * env; T.hPitch = a.p * env; break; }
-        case 'circle': { if (!a.dur) a.dur = 2.8; T.walk = smooth(0, 0.1, p) * (1 - smooth(0.9, 1, p)); T.walkSpeed = 1.1; circle = p; T.tailRaise = 0.5; break; }
       }
       if (act && act.dur && act.t > act.dur && act.name !== 'wiggle' && act.name !== 'pounce') act = null;
     }
-    return { T, L, tailFreq, purrBoost, circle, asleep, mood: asleep ? 'asleep zzz' : act ? act.name : null };
+    return { T, L, purrBoost, asleep, mood: asleep ? 'asleep zzz' : act ? act.name : null };
   };
 }
 
@@ -710,9 +707,8 @@ function headScreen() {
   return { x: (v3.x + 1) / 2 * innerWidth, y: y0, r: Math.max(24, Math.abs((1 - v4.y) / 2 * innerHeight - y0)) };
 }
 const think = makeBrain({
-  canWalk: false, headScreen,
+  headScreen,
   emitZ: () => { v3.copy(faceLocal).add(new THREE.Vector3(0.18, 0.26, 0)); bodyRig.localToWorld(v3); emit(zTex, v3, new THREE.Vector3(0.05, 0.12, 0), 2.4, 0.07); },
-  earFlick: () => { armTw.v += 6; },
 });
 const rc = new THREE.Raycaster(), ndc = new THREE.Vector2();
 function hitAt(x, y) { ndc.set(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1); rc.setFromCamera(ndc, camera); return rc.intersectObjects(hitMeshes, false)[0] || null; }
