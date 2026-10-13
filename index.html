@@ -552,13 +552,23 @@ function initAudio() {
   master = ac.createGain(); master.gain.value = 0.9; master.connect(ac.destination);
   const buf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate), d = buf.getChannelData(0);
   let last = 0; for (let i = 0; i < d.length; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; }
+  // purr: a low rumble plus a softer rasp (so laptop speakers can hear it), fluttering ~26 times a second,
+  // swelling on each slow "breath" and dipping slightly in pitch on the in-breath, like a real cat
   const src = ac.createBufferSource(); src.buffer = buf; src.loop = true;
-  const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 240;
-  const am = ac.createGain(); am.gain.value = 0.5;
-  const lfo = ac.createOscillator(); lfo.frequency.value = 23; const lfoG = ac.createGain(); lfoG.gain.value = 0.5;
-  lfo.connect(lfoG); lfoG.connect(am.gain);
+  const rumble = ac.createBiquadFilter(); rumble.type = 'lowpass'; rumble.frequency.value = 230;
+  const rasp = ac.createBiquadFilter(); rasp.type = 'bandpass'; rasp.frequency.value = 520; rasp.Q.value = 1.1;
+  const raspG = ac.createGain(); raspG.gain.value = 0.45;
+  const flutter = ac.createGain(); flutter.gain.value = 0.5;                     // 0..1 pulses
+  const lfo = ac.createOscillator(); lfo.type = 'triangle'; lfo.frequency.value = 26;
+  const lfoG = ac.createGain(); lfoG.gain.value = 0.5; lfo.connect(lfoG); lfoG.connect(flutter.gain);
+  const breath = ac.createGain(); breath.gain.value = 0.7;                       // slow in/out breathing
+  const br = ac.createOscillator(); br.frequency.value = 0.8;
+  const brG = ac.createGain(); brG.gain.value = 0.3; br.connect(brG); brG.connect(breath.gain);
+  const brF = ac.createGain(); brF.gain.value = 3; br.connect(brF); brF.connect(lfo.frequency); // flutter rate follows the breath
   purrGain = ac.createGain(); purrGain.gain.value = 0;
-  src.connect(lp); lp.connect(am); am.connect(purrGain); purrGain.connect(master); src.start(); lfo.start();
+  src.connect(rumble); src.connect(rasp); rasp.connect(raspG);
+  rumble.connect(flutter); raspG.connect(flutter); flutter.connect(breath); breath.connect(purrGain); purrGain.connect(master);
+  src.start(); lfo.start(); br.start();
 }
 function blip(f0, f1, dur, type = 'sine', vol = 0.2) {
   if (!ac || muted) return;
@@ -980,7 +990,12 @@ renderer.setAnimationLoop(() => {
   strandMeshes.forEach((m, i) => (m.material.uniforms.uLen.value = baseLen[i] * (1 + (S.poof.x - 1) * 0.6)));
 
   updateSprites(dt, t);
-  if (purrGain) purrGain.gain.setTargetAtTime(muted ? 0 : clamp(smooth(0.25, 0.9, pet) * 0.5 + (o.purrBoost || 0) * (pressing ? 1 : 0), 0, 0.8), ac.currentTime, 0.15);
+  // purr starts as soon as you stroke, grows as Muse gets happier, lingers a little after, and hums softly in its sleep
+  let purr = smooth(0.2, 0.9, pet) * 0.7;
+  if (pressing) purr = Math.max(purr, 0.45 + 0.6 * happy) + (o.purrBoost || 0) * 1.5;
+  if (pose && pose.name === 'ILoveYou') purr = Math.max(purr, 0.7);
+  if (o.asleep) purr = Math.max(purr, 0.18);
+  if (purrGain) purrGain.gain.setTargetAtTime(muted ? 0 : clamp(purr * 1.6, 0, 1.9), ac.currentTime, pressing ? 0.08 : 0.3);
 
   $('pHand').textContent = hand ? (pinch ? 'pinch' : 'open') : (landmarker ? 'not seen' : '—');
   $('pMood').textContent = o.mood && !grabbing && startled <= 0 && !pressing ? o.mood : grabbing ? 'held' : startled > 0 ? 'startled!' : happy > 0.5 ? 'happy ♥' : pressing ? 'being petted' : cur ? 'curious' : 'idle';
