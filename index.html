@@ -58,7 +58,7 @@
 <canvas id="fx"></canvas>
 <video id="cam" class="off" playsinline muted></video>
 <div id="panelUI" class="card"><div class="row">input <b id="pInput">—</b></div><div class="row">hand <b id="pHand">—</b></div><div class="row">gesture <b id="pGest">—</b></div><div class="row">mood <b id="pMood">idle</b></div><div id="meter"><i id="pMeter"></i></div></div>
-<div id="keys" class="card"><b>🖐 Stroke</b> with an open hand to pet (chin &amp; head too) · <b>☝️ Point</b> and Muse follows · <b>🤏 Pinch</b> to carry, open to drop<br><b>Hold still:</b> 👍 dance · ✌️ pose · 🤟 hearts · ✋ high-five (push forward to clap) · <b>👋 Wave</b> and it waves back<br><b>Mouse:</b> drag to pet · click to poke · shift-drag to carry · double-click the floor to walk there · right-drag to orbit &nbsp; <kbd>V</kbd> camera <kbd>S</kbd> sound <kbd>H</kbd> hide UI</div>
+<div id="keys" class="card"><b>🖐 Stroke</b> with an open hand to pet (chin &amp; head too) · <b>☝️ Point</b> and Muse follows · <b>🤏 Pinch</b> to carry, open to drop<br><b>Hold still:</b> 👍 dance · ✌️ pose · 🤟 hearts · ✋ high-five (push forward to clap) · <b>✊→🖐 make a fist, then open it</b> for fireworks · <b>👋 Wave</b> and it waves back<br><b>Mouse:</b> drag to pet · click to poke · shift-drag to carry · double-click the floor to walk there · right-drag to orbit &nbsp; <kbd>F</kbd> fireworks <kbd>V</kbd> camera <kbd>S</kbd> sound <kbd>H</kbd> hide UI</div>
 <div id="start"><div class="card"><h2>Say hi to Muse</h2><p>Uses your webcam and MediaPipe hand tracking; video never leaves your browser. Pet it, wave at it, poke it, or leave it alone and it'll nap.</p><button class="pri" id="bCam">Start camera</button><button id="bMouse">Use mouse</button></div></div>
 <div id="toast" class="card"></div>
 <script type="module">
@@ -737,6 +737,7 @@ addEventListener('keydown', e => {
   if (k === 'h') document.body.classList.toggle('clean');
   if (k === 'v') $('cam').classList.toggle('off');
   if (k === 's') { muted = !muted; toast(muted ? 'Sound off' : 'Sound on'); }
+  if (k === 'f') { initAudio(); fireworksAt(null); }
 });
 
 const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
@@ -763,6 +764,80 @@ function startPose(name) {
 function endPose() { pose = null; poseCD = 0.8; }
 function clap() { blip(1900, 900, 0.05, 'square', 0.09); setTimeout(() => blip(1700, 800, 0.05, 'square', 0.07), 70); for (let i = 0; i < 8; i++) setTimeout(burstHeart, i * 40); }
 function burstHeart() { const f = faceLocal.clone(); bodyRig.localToWorld(f); f.add(new THREE.Vector3((Math.random() - 0.5) * 0.4, (Math.random() - 0.2) * 0.3, 0.15)); emit(heartTex, f, new THREE.Vector3((Math.random() - 0.5) * 0.3, 0.3 + Math.random() * 0.25, 0.05), 1.6, 0.06 + Math.random() * 0.03); }
+
+// ---------- fireworks: rocket → burst of glowing sparks (✊ then open your hand) ----------
+const FW_MAX = 2400, FW_COLORS = [0xff4d6d, 0xffb703, 0x9b5de5, 0x4cc9f0, 0xf15bb5, 0xfee440, 0x00f5d4, 0xff7a00].map(c => new THREE.Color(c));
+const fwPos = new Float32Array(FW_MAX * 3), fwCol = new Float32Array(FW_MAX * 3), fwVel = new Float32Array(FW_MAX * 3), fwLife = new Float32Array(FW_MAX), fwMax = new Float32Array(FW_MAX), fwBase = new Float32Array(FW_MAX * 3), fwKind = new Uint8Array(FW_MAX);
+const fwGeo = new THREE.BufferGeometry();
+fwGeo.setAttribute('position', new THREE.BufferAttribute(fwPos, 3).setUsage(THREE.DynamicDrawUsage));
+fwGeo.setAttribute('color', new THREE.BufferAttribute(fwCol, 3).setUsage(THREE.DynamicDrawUsage));
+const fwTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'); const g = x.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.25, 'rgba(255,255,255,.85)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); const t = new THREE.CanvasTexture(c); return t; })();
+const fwPoints = new THREE.Points(fwGeo, new THREE.PointsMaterial({ size: 0.085, map: fwTex, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, toneMapped: false }));
+fwPoints.frustumCulled = false; fwPoints.renderOrder = 5; scene.add(fwPoints);
+let fwNext = 0; const rockets = [];
+// the room dims to a night sky while fireworks are up, so the sparks glow
+let night = 0, lastBurst = -1e9;
+const BG_DAY = new THREE.Color(BG), BG_NIGHT = new THREE.Color(0x1c1633), GROUND_DAY = ground.material.color.clone(), GROUND_NIGHT = new THREE.Color(0x2b2444);
+function fwSpawn(p, v, life, col, kind) {
+  const i = fwNext; fwNext = (fwNext + 1) % FW_MAX;
+  fwPos.set([p.x, p.y, p.z], i * 3); fwVel.set([v.x, v.y, v.z], i * 3); fwLife[i] = fwMax[i] = life; fwKind[i] = kind;
+  fwBase.set([col.r, col.g, col.b], i * 3);
+}
+function noiseBurst(dur, freq, vol, q = 0.7) {
+  if (!ac || muted) return;
+  const n = ac.currentTime, b = ac.createBuffer(1, Math.ceil(ac.sampleRate * dur), ac.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2.5);
+  const src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+  src.buffer = b; f.type = 'lowpass'; f.frequency.value = freq; f.Q.value = q; g.gain.value = vol;
+  src.connect(f); f.connect(g); g.connect(master); src.start(n);
+}
+function launchFirework(target) {
+  const from = new THREE.Vector3(target.x + (Math.random() - 0.5) * 0.3, 0.05, -0.35);
+  rockets.push({ p: from, to: target.clone(), t: 0, dur: 0.55, col: FW_COLORS[Math.floor(Math.random() * FW_COLORS.length)] });
+  blip(500, 1700, 0.5, 'sine', 0.05); // whistle
+}
+function explode(at, col) {
+  const col2 = FW_COLORS[Math.floor(Math.random() * FW_COLORS.length)], n = 230, v = new THREE.Vector3();
+  for (let k = 0; k < n; k++) {
+    v.set(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1).normalize().multiplyScalar(0.75 + Math.random() * 0.45);
+    fwSpawn(at, v, 1.2 + Math.random() * 0.7, Math.random() < 0.7 ? col : col2, Math.random() < 0.25 ? 2 : 1);
+  }
+  noiseBurst(0.6, 900, 0.5); setTimeout(() => noiseBurst(0.35, 2400, 0.12), 60);
+  for (let k = 0; k < 10; k++) setTimeout(() => noiseBurst(0.04, 4000 + Math.random() * 3000, 0.05, 2), 250 + Math.random() * 900); // crackle
+  fwLook = { pt: at.clone(), until: performance.now() + 1800 }; cheer = 1.6; lastBurst = performance.now();
+}
+const _white = new THREE.Color(1, 0.95, 0.8);
+function updateFireworks(dt) {
+  for (let r = rockets.length - 1; r >= 0; r--) {
+    const k = rockets[r]; k.t += dt; const u = Math.min(1, k.t / k.dur), e = 1 - Math.pow(1 - u, 2);
+    const pos = k.p.clone().lerp(k.to, e); pos.x += Math.sin(k.t * 30) * 0.004;
+    fwSpawn(pos, new THREE.Vector3((Math.random() - 0.5) * 0.08, -0.15, (Math.random() - 0.5) * 0.08), 0.35, _white, 0); // rocket trail
+    if (u >= 1) { explode(k.to, k.col); rockets.splice(r, 1); }
+  }
+  for (let i = 0; i < FW_MAX; i++) {
+    if (fwLife[i] <= 0) { fwCol[i * 3] = fwCol[i * 3 + 1] = fwCol[i * 3 + 2] = 0; continue; }
+    fwLife[i] -= dt; const drag = Math.exp(-dt * 1.6);
+    fwVel[i * 3] *= drag; fwVel[i * 3 + 1] = fwVel[i * 3 + 1] * drag - 0.9 * dt; fwVel[i * 3 + 2] *= drag;
+    fwPos[i * 3] += fwVel[i * 3] * dt; fwPos[i * 3 + 1] += fwVel[i * 3 + 1] * dt; fwPos[i * 3 + 2] += fwVel[i * 3 + 2] * dt;
+    let a = Math.max(0, fwLife[i] / fwMax[i]); a = a * a;
+    if (fwKind[i] === 2) a *= 0.4 + 0.6 * (Math.random() < 0.5 ? 1 : 0.2); // twinkling crackle
+    const hot = fwKind[i] === 0 ? 1 : Math.max(0, (fwLife[i] / fwMax[i] - 0.8) * 5); // white-hot at the start
+    fwCol[i * 3] = (fwBase[i * 3] + (1 - fwBase[i * 3]) * hot) * a * 1.6;
+    fwCol[i * 3 + 1] = (fwBase[i * 3 + 1] + (1 - fwBase[i * 3 + 1]) * hot) * a * 1.6;
+    fwCol[i * 3 + 2] = (fwBase[i * 3 + 2] + (1 - fwBase[i * 3 + 2]) * hot) * a * 1.6;
+  }
+  fwGeo.attributes.position.needsUpdate = true; fwGeo.attributes.color.needsUpdate = true;
+  const dark = rockets.length > 0 || performance.now() - lastBurst < 2400 ? 1 : 0;
+  night = lerp(night, dark, 1 - Math.exp(-dt * (dark ? 4 : 1.2)));
+  scene.background.lerpColors(BG_DAY, BG_NIGHT, night); scene.fog.color.copy(scene.background);
+  ground.material.color.lerpColors(GROUND_DAY, GROUND_NIGHT, night);
+}
+let fwLook = null, cheer = 0, fistStart = -1, fistLast = -1e9;
+function fireworksAt(x, y) { // screen point → burst above Muse, toward where your hand is
+  const w = x != null ? planeAt(x, y) : null;
+  const tx = clamp(w ? w.x : P.x + (Math.random() - 0.5) * 0.8, -XMAX() - 0.3, XMAX() + 0.3), ty = clamp(w ? w.y : 1.05 + Math.random() * 0.15, 0.95, 1.2);
+  launchFirework(new THREE.Vector3(tx, ty, -0.35));
+}
 renderer.domElement.addEventListener('dblclick', e => { if (hitAt(e.clientX, e.clientY)) return; const w = planeAt(e.clientX, e.clientY); if (w) { targetX = clamp(w.x, -XMAX(), XMAX()); followLast = performance.now() - 300; } });
 async function startCamera() {
   initAudio(); $('pInput').textContent = 'starting…';
@@ -859,6 +934,7 @@ renderer.setAnimationLoop(() => {
     ndc.set(cur.x / innerWidth * 2 - 1, -(cur.y / innerHeight) * 2 + 1); rc.setFromCamera(ndc, camera);
     if (rc.ray.intersectPlane(lookPlane, lookPt)) { const dx = lookPt.x - P.x, dy = lookPt.y - FACE_Y - hopY - carry.y, dz = lookPt.z; S.yaw.t = clamp(Math.atan2(dx, dz), -0.8, 0.8); S.pitch.t = clamp(Math.atan2(-dy, Math.hypot(dx, dz)), -0.5, 0.5); }
   } else { S.yaw.t = Math.sin(t * 0.37) * 0.25 + Math.sin(t * 0.11) * 0.12; S.pitch.t = Math.sin(t * 0.23) * 0.06; }
+  if (fwLook && now < fwLook.until) { const dx = fwLook.pt.x - P.x, dy = fwLook.pt.y - FACE_Y - hopY - carry.y, dz = fwLook.pt.z - 0.1; S.yaw.t = clamp(Math.atan2(dx, Math.max(0.3, Math.abs(dz))), -0.8, 0.8); S.pitch.t = clamp(Math.atan2(-dy, Math.hypot(dx, 0.6)), -0.6, 0.5); }
 
   // petting
   if (pressing && !grabbing) {
@@ -881,6 +957,11 @@ renderer.setAnimationLoop(() => {
   let g = hand ? gestNow : 'None';
   if (hand && (g === 'Pointing_Up' || curShape?.pointing)) g = 'Point';
   $('pGest').textContent = hand ? (POSE_EMOJI[g] || (curShape?.open ? '🖐 open hand' : (pinch ? '🤏 pinch' : '—'))) : '—';
+  // ✊ then open your hand quickly → fireworks (the open hand right after a fist doesn't count as a high-five)
+  if (hand && gestNow === 'Closed_Fist') { if (fistStart < 0) fistStart = now; fistLast = now; } else fistStart = -1;
+  if (hand && fistLast > 0 && now - fistLast < 600 && (gestNow === 'Open_Palm' || curShape?.n >= 4) && !grabbing) {
+    fistLast = -1e9; fireworksAt(cur ? cur.x : null, cur ? cur.y : null); poseCD = 1.6; if (pose) endPose(); poseCand = null;
+  }
   const POSES = ['Thumb_Up', 'Victory', 'ILoveYou', 'Open_Palm'];
   if (!pose && hand && !pressing && !grabbing && still && POSES.includes(g)) {
     if (poseCand === g) poseHeld += dt; else { poseCand = g; poseHeld = 0; }
@@ -888,6 +969,12 @@ renderer.setAnimationLoop(() => {
   } else if (!pose) { poseCand = null; poseHeld = 0; }
 
   let wink = 0, sitAmt = 0;
+  if (cheer > 0) { // fireworks: wide eyes, "ooh" mouth, arms up, a happy hop
+    cheer -= dt; const c = Math.min(1, cheer);
+    S.dil.t = 0.11; S.mouth.t = 0.45 * c; armS[0].x.t = armS[1].x.t = -2.5 * c; armS[0].z.t = Math.sin(t * 10) * 0.3 * c; armS[1].z.t = -Math.sin(t * 10) * 0.3 * c;
+    if (cheer > 1.45 && hopY === 0) hopV = 1.9;
+    if (cheer < 0.6) S.happyArc.t = 1;
+  }
   if (pose) {
     pose.t += dt; const pt = pose.t;
     const graceOut = name => { pose.grace = gestNow === name && hand ? 0 : pose.grace + dt; return pose.grace > 0.45; };
@@ -990,6 +1077,7 @@ renderer.setAnimationLoop(() => {
   strandMeshes.forEach((m, i) => (m.material.uniforms.uLen.value = baseLen[i] * (1 + (S.poof.x - 1) * 0.6)));
 
   updateSprites(dt, t);
+  updateFireworks(dt);
   // purr starts as soon as you stroke, grows as Muse gets happier, lingers a little after, and hums softly in its sleep
   let purr = smooth(0.2, 0.9, pet) * 0.7;
   if (pressing) purr = Math.max(purr, 0.45 + 0.6 * happy) + (o.purrBoost || 0) * 1.5;

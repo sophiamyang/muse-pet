@@ -15,12 +15,13 @@ A hand-tracked desktop pet in the browser: the fuzzy Muse mascot (three.js, stra
 | ✌️ hold | Strikes a pose and winks |
 | 🤟 hold | Burst of hearts |
 | ✋ hold still | High-five; push your palm forward to clap |
+| ✊ → 🖐 make a fist, then open it | Fireworks burst where your hand is; the room goes dark, Muse cheers and hops |
 | 👋 Wave (not over Muse) | Waves back |
 | Leave it alone ~20 s | Naps, wakes when you return |
 
 Held gestures trigger after about half a second of holding still, with the palm facing the camera.
 
-Mouse: drag to pet, click to poke, shift-drag to carry, double-click the floor to walk there, right-drag to orbit. Keys: `V` camera preview, `S` sound, `H` hide UI.
+Mouse: drag to pet, click to poke, shift-drag to carry, double-click the floor to walk there, right-drag to orbit. Keys: `F` fireworks, `V` camera preview, `S` sound, `H` hide UI.
 
 ## Built with
 
