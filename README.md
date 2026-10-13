@@ -14,7 +14,7 @@ A hand-tracked desktop pet in the browser: the fuzzy Muse mascot (three.js, stra
 | 👍 hold | Happy dance |
 | ✌️ hold | Strikes a pose and winks |
 | 🤟 hold | Burst of hearts |
-| ✋ hold still | High-five; push your palm forward to clap |
+| ✋ hold still | Muse raises a paw for a high-five; push your hand toward the camera to clap (hearts + hop) |
 | ✊ → 🖐 make a fist, then open it | Fireworks burst where your hand is; the room goes dark, Muse cheers and hops |
 | 👋 Wave (not over Muse) | Waves back |
 | Leave it alone ~20 s | Naps, wakes when you return |

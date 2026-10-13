@@ -58,7 +58,7 @@
 <canvas id="fx"></canvas>
 <video id="cam" class="off" playsinline muted></video>
 <div id="panelUI" class="card"><div class="row">input <b id="pInput">—</b></div><div class="row">hand <b id="pHand">—</b></div><div class="row">gesture <b id="pGest">—</b></div><div class="row">mood <b id="pMood">idle</b></div><div id="meter"><i id="pMeter"></i></div></div>
-<div id="keys" class="card"><b>🖐 Stroke</b> with an open hand to pet (chin &amp; head too) · <b>☝️ Point</b> and Muse follows · <b>🤏 Pinch</b> to carry, open to drop<br><b>Hold still:</b> 👍 dance · ✌️ pose · 🤟 hearts · ✋ high-five (push forward to clap) · <b>✊→🖐 make a fist, then open it</b> for fireworks · <b>👋 Wave</b> and it waves back<br><b>Mouse:</b> drag to pet · click to poke · shift-drag to carry · double-click the floor to walk there · right-drag to orbit &nbsp; <kbd>F</kbd> fireworks <kbd>V</kbd> camera <kbd>S</kbd> sound <kbd>H</kbd> hide UI</div>
+<div id="keys" class="card"><b>🖐 Stroke</b> with an open hand to pet (chin &amp; head too) · <b>☝️ Point</b> and Muse follows · <b>🤏 Pinch</b> to carry, open to drop<br><b>Hold still:</b> 👍 dance · ✌️ pose · 🤟 hearts · ✋ high-five, then push your hand toward the camera to clap · <b>✊→🖐 make a fist, then open it</b> for fireworks · <b>👋 Wave</b> and it waves back<br><b>Mouse:</b> drag to pet · click to poke · shift-drag to carry · double-click the floor to walk there · right-drag to orbit &nbsp; <kbd>F</kbd> fireworks <kbd>V</kbd> camera <kbd>S</kbd> sound <kbd>H</kbd> hide UI</div>
 <div id="start"><div class="card"><h2>Say hi to Muse</h2><p>Uses your webcam and MediaPipe hand tracking; video never leaves your browser. Pet it, wave at it, poke it, or leave it alone and it'll nap.</p><button class="pri" id="bCam">Start camera</button><button id="bMouse">Use mouse</button></div></div>
 <div id="toast" class="card"></div>
 <script type="module">
@@ -758,7 +758,7 @@ let targetX = 0, followLast = -1e9, curShape = null, strokeT = 0;
 const carry = { on: false, x: 0, y: 0, vx: 0, drop: false, dv: 0, swing: new Spring(30, 3) };
 let pose = null, poseCand = null, poseHeld = 0, poseCD = 0;
 function startPose(name) {
-  pose = { name, t: 0, grace: 0 }; poseCD = 1.2; poseCand = null; poseHeld = 0;
+  pose = { name, t: 0, grace: 0, size0: handSize, minSize: handSize }; poseCD = 1.2; poseCand = null; poseHeld = 0;
   ({ Thumb_Up: () => meow(1.25, 0.35), Victory: () => blip(2400, 1200, 0.06, 'square', 0.06), ILoveYou: () => meow(1.35, 0.5), Open_Palm: () => mrrp() }[name] || (() => {}))();
 }
 function endPose() { pose = null; poseCD = 0.8; }
@@ -880,7 +880,7 @@ const armS = arms.map(() => ({ x: new Spring(120, 13), z: new Spring(120, 13) })
 const armTw = new Spring(80, 6);
 const baseLen = strandMeshes.map(m => m.material.uniforms.uLen.value);
 let hopY = 0, hopV = 0, pet = 0, startled = 0, hello = 0, grabbing = false, grabSrc = null, pokeCD = 0, nextBlink = 2, blinkT = 0;
-let hsS = 0, hsRate = 0, pinch = false, handWas = false, handGone = -1e9, prevCur = null, lastSrc = null; const vel = { x: 0, y: 0 };
+let hsS = 0, hsRate = 0, handSize = 0, pinch = false, handWas = false, handGone = -1e9, prevCur = null, lastSrc = null; const vel = { x: 0, y: 0 };
 function startGrab(src) { grabbing = true; grabSrc = src; carry.x = P.x; carry.y = 0; carry.vx = 0; carry.drop = false; pose = null; blip(520, 760, 0.12, 'triangle', 0.12); }
 function endGrab() { grabbing = false; grabSrc = null; S.spin.t = Math.round(S.spin.x / (Math.PI * 2)) * Math.PI * 2; }
 function poke() { if (pokeCD > 0) return; pokeCD = 0.7; hopV = 2.4; S.squash.v -= 2.2; startled = 0.9; pet *= 0.6; blip(900, 260, 0.18, 'sine', 0.16); setTimeout(mrrp, 120); }
@@ -914,6 +914,7 @@ renderer.setAnimationLoop(() => {
   if (hand) {
     src = 'hand';
     const hs = Math.hypot(hand[0].x - hand[9].x, hand[0].y - hand[9].y);
+    handSize = (hs + Math.hypot(hand[5].x - hand[17].x, hand[5].y - hand[17].y) * 1.4) / 2; // palm length + width: grows as the hand comes toward the camera
     hsRate = lerp(hsRate, hsS ? (hs - hsS) / Math.max(hs, 1e-3) / dt : 0, 0.3); hsS = lerp(hsS || hs, hs, 0.35);
     const pd = Math.hypot(hand[4].x - hand[8].x, hand[4].y - hand[8].y) / Math.max(hs, 1e-3);
     pinch = pinch ? pd < 0.5 : pd < 0.32;
@@ -1005,7 +1006,10 @@ renderer.setAnimationLoop(() => {
       case 'Open_Palm': { // reach up for a high-five; push forward to clap
         const side = cur && cur.x > headScreen().x ? 1 : 0;
         armS[side].x.t = -2.6; armS[side].z.t = 0; S.tilt.t = side ? -0.15 : 0.15; S.dil.t = 0.1;
-        if (hsRate > 0.9) { clap(); endPose(); hopV = 2.0; pet = Math.min(1, pet + 0.3); break; }
+        // clap when your palm comes ~18% closer than its smallest size during the high-five (moving toward the camera)
+        pose.minSize = Math.min(pose.minSize, handSize);
+        $('pGest').textContent = '✋ push toward the camera!';
+        if (hand && handSize > pose.minSize * 1.18) { clap(); endPose(); hopV = 2.0; pet = Math.min(1, pet + 0.3); S.happyArc.t = 1; break; }
         if (graceOut('Open_Palm') || pt > 5) endPose(); break; }
     }
   }
