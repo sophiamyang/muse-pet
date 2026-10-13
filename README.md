@@ -2,6 +2,8 @@
 
 A hand-tracked desktop pet in the browser: the fuzzy Muse mascot (three.js, strand-fur shading) reacting to your webcam hand via MediaPipe.
 
+![Muse Pet demo: petting Muse with hearts, the 🤟 love-you gesture, hand tracking overlay](demo.gif)
+
 **Try it:** https://sophiamyang.github.io/muse-pet/ (or open `index.html` in Chrome). Click **Start camera**, or **Use mouse**.
 
 ## Gestures
