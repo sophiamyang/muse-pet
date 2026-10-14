@@ -1,12 +1,19 @@
 # Muse Pet
 
-A hand-tracked desktop pet in the browser: the fuzzy Muse mascot (three.js, strand-fur shading) reacting to your webcam hand via MediaPipe.
+Two hand-tracked toys in the browser starring the fuzzy Muse mascot (three.js strand-fur shading + MediaPipe hand tracking):
+
+- **Muse Pet** (pet it, carry it, fireworks): https://sophiamyang.github.io/muse-pet/
+- **Muse, on your hand (AR)** (your webcam is the screen, Muse sits on your hand): https://sophiamyang.github.io/muse-pet/ar.html
+
+Both run entirely in your browser; the camera video never leaves your computer. Click **Start camera** to begin.
 
 ![Muse Pet demo: petting Muse with hearts, the 🤟 love-you gesture, hand tracking overlay](demo.gif)
 
+## Muse Pet
+
 **Try it:** https://sophiamyang.github.io/muse-pet/ (or open `index.html` in Chrome). Click **Start camera**, or **Use mouse**.
 
-## Gestures
+### Gestures
 
 | Gesture | Reaction |
 |---|---|
@@ -25,11 +32,25 @@ Held gestures trigger after about half a second of holding still, with the palm 
 
 Mouse: drag to pet, click to poke, shift-drag to carry, double-click the floor to walk there, right-drag to orbit. Keys: `F` fireworks, `V` camera preview, `S` sound, `H` hide UI.
 
-## Also: Muse, on your hand (AR)
+## Muse, on your hand (AR)
 
-Your webcam becomes the screen and Muse sits on your hand: it hops across your fingertips, sleeps on your fist, twirls on a pointing finger, dances on your thumb, and fist → open sets off fireworks.
+**Try it:** https://sophiamyang.github.io/muse-pet/ar.html (or open `ar.html` in Chrome). Click **Start camera**.
 
-**Try it:** https://sophiamyang.github.io/muse-pet/ar/ · [details](ar/README.md)
+Your webcam becomes the screen and Muse sits on your hand, following it around. Hold a pose for about a third of a second; the pose name lights up at the top and in the list on the left.
+
+| Pose | Muse |
+|---|---|
+| ✋ Open palm | Hops from fingertip to fingertip, index to pinky and back; push your hand toward the camera to clap (hearts + hop) |
+| ✊ Fist | Curls up on your knuckles and falls asleep (Zzz) |
+| ✊ → 🖐 Fist, then open your hand | Fireworks! The room goes dark and Muse cheers |
+| ☝️ Point up | Balances on your fingertip and twirls, sparkling |
+| 👍 Thumbs up | Dance party on your thumb, with music notes |
+| ✌️ Peace sign | Strikes a pose and winks |
+| 🤟 Love-you sign | Showers of hearts and a big blush |
+| 👎 Thumbs down | Sulks under its own little rain cloud |
+| Hand away | Drops to the floor and waits |
+
+Keys: `H` hide UI, `S` sound.
 
 ## Built with
 
