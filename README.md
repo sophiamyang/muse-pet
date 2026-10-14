@@ -25,6 +25,12 @@ Held gestures trigger after about half a second of holding still, with the palm 
 
 Mouse: drag to pet, click to poke, shift-drag to carry, double-click the floor to walk there, right-drag to orbit. Keys: `F` fireworks, `V` camera preview, `S` sound, `H` hide UI.
 
+## Also: Muse, on your hand (AR)
+
+Your webcam becomes the screen and Muse sits on your hand: it hops across your fingertips, sleeps on your fist, twirls on a pointing finger, dances on your thumb, and fist → open sets off fireworks.
+
+**Try it:** https://sophiamyang.github.io/muse-pet/ar/ · [details](ar/README.md)
+
 ## Built with
 
 [three.js](https://threejs.org) and [MediaPipe Gesture Recognizer](https://ai.google.dev/edge/mediapipe/solutions/vision/gesture_recognizer), both loaded from CDN.

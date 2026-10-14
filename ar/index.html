@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Muse on Your Hand</title>
+<style>
+  :root { --ink: #2b2440; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #15111f; }
+  #cam { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: cover; transform: scaleX(-1); }
+  canvas#gl { z-index: 1; position: fixed; inset: 0; width: 100vw !important; height: 100vh !important; display: block; }
+  #fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .card { background: rgba(255,255,255,.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(60,40,120,.15); border-radius: 14px; color: var(--ink); font: 12.5px/1.6 ui-rounded, system-ui, sans-serif; }
+  #help { position: fixed; left: 16px; bottom: 16px; padding: 10px 14px; max-width: min(560px, calc(100vw - 32px)); }
+  #help b { font-weight: 650; }
+  #state { position: fixed; right: 16px; top: 16px; padding: 7px 12px; font-weight: 600; }
+  kbd { font: 600 10.5px ui-monospace, Menlo, monospace; background: #fff; border: 1px solid rgba(60,40,120,.2); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; }
+  body.clean #help, body.clean #state { display: none; }
+  .card { z-index: 2; }
+  #night { position: fixed; inset: 0; background: #0b0820; opacity: 0; pointer-events: none; }
+  #pose { position: fixed; left: 50%; top: 18px; transform: translateX(-50%) scale(.9); padding: 8px 18px; font-size: 20px; font-weight: 700; opacity: 0; transition: opacity .2s, transform .2s; display: flex; gap: 10px; align-items: center; }
+  #pose.on { opacity: 1; transform: translateX(-50%) scale(1); }
+  #pose span { font-size: 26px; }
+  #legend { position: fixed; left: 16px; top: 50%; transform: translateY(-50%); margin: 0; padding: 8px 6px; list-style: none; font-size: 13px; }
+  #legend li { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 9px; opacity: .75; transition: background .2s, opacity .2s; }
+  #legend li span { font-size: 20px; width: 26px; text-align: center; }
+  #legend li.on { background: #8f74e0; color: #fff; opacity: 1; font-weight: 700; }
+  body.clean #legend, body.clean #pose { display: none; }
+  #start { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 40%, #3a2f5c, #15111f); z-index: 5; }
+  #start .card { padding: 24px 26px; max-width: 430px; font-size: 14px; }
+  #start h2 { margin: 0 0 8px; font-size: 22px; }
+  #start p { margin: 0 0 16px; opacity: .85; }
+  #start button { font: 600 14px ui-rounded, system-ui, sans-serif; border-radius: 10px; padding: 11px 18px; cursor: pointer; border: 0; background: #8f74e0; color: #fff; }
+  #toast { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); padding: 8px 14px; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 6; }
+  #toast.on { opacity: 1; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<video id="cam" playsinline muted></video>
+<canvas id="fx"></canvas>
+<div id="night"></div>
+<div id="pose" class="card"></div>
+<ul id="legend" class="card">
+  <li data-p="Open_Palm"><span>✋</span>finger hop</li>
+  <li data-p="Closed_Fist"><span>✊</span>sleep</li>
+  <li data-p="FW"><span>✊→🖐</span>fireworks</li>
+  <li data-p="Pointing_Up"><span>☝️</span>twirl</li>
+  <li data-p="Thumb_Up"><span>👍</span>dance</li>
+  <li data-p="Victory"><span>✌️</span>pose</li>
+  <li data-p="ILoveYou"><span>🤟</span>love</li>
+  <li data-p="Thumb_Down"><span>👎</span>sad</li>
+</ul>
+<div id="start"><div class="card"><h2>Muse, on your hand</h2><p>Your webcam becomes the screen and Muse sits on your hand. Hold a pose for a moment to see what it does (same poses as Muse Pet: ✊→🖐 fireworks, ✋ high-five, 👍 dance, ✌️ pose, 🤟 hearts). Video never leaves your browser.</p><button id="bGo">Start camera</button></div></div>
+<div id="toast" class="card"></div>
+<script type="module">
+import * as THREE from 'three';
+import { MeshSurfaceSampler } from 'three/addons/math/MeshSurfaceSampler.js';
+
+// ---------- renderer / scene: transparent, over the mirrored webcam ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x000000, 0);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.95;
+renderer.domElement.id = 'gl';
+document.body.insertBefore(renderer.domElement, document.getElementById('fx'));
+const scene = new THREE.Scene();
+// orthographic camera in screen pixels: x right, y up, origin at screen centre
+let W = innerWidth, H = innerHeight;
+const camera = new THREE.OrthographicCamera(-W / 2, W / 2, H / 2, -H / 2, 0.1, 10000);
+camera.position.z = 4000; // far back so the fur's view direction stays nearly straight-on
+addEventListener('resize', () => { W = innerWidth; H = innerHeight; camera.left = -W / 2; camera.right = W / 2; camera.top = H / 2; camera.bottom = -H / 2; camera.updateProjectionMatrix(); renderer.setSize(W, H); });
+
+// ---------- lights ----------
+const LIGHT_DIR = new THREE.Vector3(-1.0, 2.0, 2.0).normalize();
+const key = new THREE.DirectionalLight(0xFFF1DE, 2.2); key.position.copy(LIGHT_DIR).multiplyScalar(4); scene.add(key);
+const fill = new THREE.DirectionalLight(0xE8ECFF, 0.6); fill.position.set(2.5, 1.2, 1.5); scene.add(fill);
+const rim = new THREE.DirectionalLight(0xFFFFFF, 1.1); rim.position.set(0.5, 2, -3); scene.add(rim);
+const SKY = new THREE.Color(0xFFF6EA), GROUND = new THREE.Color(0xC9B9A6);
+scene.add(new THREE.HemisphereLight(SKY, GROUND, 1.0));
+
+// ---------- the Muse character: same code as muse-pet ----------
+function radialTexture(stops) {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  stops.forEach(([o, col]) => grd.addColorStop(o, col));
+  g.fillStyle = grd; g.fillRect(0, 0, 256, 256);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+// ---------- fur (shell texturing) ----------
+const SHELLS = 48;
+// AR: Muse is drawn in screen pixels, so height-based shading uses height above its feet in body units
+const FURU = { uFeetY: { value: 0 }, uScale: { value: 1 } };
+// Plush reads as soft when the pile is dense, fine and low-contrast, with gentle lumps and a
+// bright fuzzy sheen at grazing angles, not when individual long strands are visible.
+const furVert = /* glsl */`
+  uniform float uH, uLen, uTime, uFaceOn;
+  uniform vec2 uFaceC, uFaceR;
+  varying vec2 vUv; varying vec3 vN; varying vec3 vWP; varying vec3 vObj; varying float vLump;
+  void main() {
+    vUv = uv; vObj = position;
+    vec3 p = position;
+    float mask = 1.0, hood = 0.0;
+    if (uFaceOn > 0.5 && p.z > 0.0) {
+      vec2 q = abs((p.xy - uFaceC) / uFaceR); float e = pow(pow(q.x, 3.0) + pow(q.y, 3.0), 1.0 / 3.0);
+      mask = smoothstep(0.85, 1.15, e);
+      hood = exp(-pow((e - 1.2) / 0.25, 2.0)); // a slightly thicker ring framing the face, like a hood
+    }
+    // soft lumps across the surface, like a plush that has been hugged a lot
+    float lump = sin(p.x * 21.0 + sin(p.y * 13.0)) * sin(p.y * 17.0 + sin(p.z * 19.0)) * sin(p.z * 23.0 + sin(p.x * 11.0));
+    vLump = lump;
+    vec3 wn = normalize(mat3(modelMatrix) * normal);
+    vec4 wp = modelMatrix * vec4(p, 1.0);
+    float L = uLen * mask * (1.0 + 0.35 * hood) * (0.85 + 0.3 * lump);
+    float sway = sin(uTime * 1.2 + wp.y * 7.0 + wp.x * 5.0) * 0.05;
+    wp.xyz += wn * L * uH + vec3(sway, -0.25, sway * 0.6) * L * uH * uH;
+    vN = wn; vWP = wp.xyz;
+    gl_Position = projectionMatrix * viewMatrix * wp;
+  }`;
+const furFrag = /* glsl */`
+  uniform float uH, uFaceOn, uFeetY, uScale;
+  uniform vec2 uDensity, uFaceC, uFaceR;
+  uniform vec3 uRoot, uTip, uLightDir, uSky, uGround;
+  varying vec2 vUv; varying vec3 vN; varying vec3 vWP; varying vec3 vObj; varying float vLump;
+  float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+  void main() {
+    float h = uH;
+    // face mask per pixel; smaller than the face panel so the fur fringe overlaps its edge
+    float mask = 1.0;
+    if (uFaceOn > 0.5 && vObj.z > 0.0) { vec2 q = abs((vObj.xy - uFaceC) / uFaceR); mask = smoothstep(0.85, 1.0, pow(pow(q.x, 3.0) + pow(q.y, 3.0), 1.0 / 3.0)); }
+    vec2 st = vUv * uDensity;
+    // strands lean into the centre of small 5x5 clumps toward their tips
+    // clump grid is rotated against the strand grid so the two don't beat into visible rows
+    const mat2 ROT = mat2(0.8, 0.6, -0.6, 0.8);
+    vec2 cs = ROT * st / 5.0, ci = floor(cs);
+    vec2 cc = ci + 0.5 + (vec2(hash(ci + 1.7), hash(ci + 5.3)) - 0.5) * 0.8;
+    st += transpose(ROT) * (cc - cs) * 5.0 * 0.5 * h;
+    vec2 cell = floor(st);
+    float r = hash(cell);
+    float a = 1.0;
+    if (h > 0.0) {
+      if (mask < 0.02 || h > mask) discard;
+      vec2 f = fract(st) - 0.5 - (vec2(hash(cell + 7.1), hash(cell + 3.7)) - 0.5) * 0.3;
+      float len = mix(0.7, 1.0, r);
+      if (h > len) discard;
+      float rad = 0.8 * pow(1.0 - h / len, 0.6);
+      float d = length(f);
+      if (d > rad) discard;
+      a = smoothstep(rad, rad * 0.4, d) * mix(1.0, 0.6, h);
+    }
+    vec3 n = normalize(vN);
+    vec3 v = normalize(cameraPosition - vWP);
+    vec3 base = mix(uRoot, uTip, pow(h, 0.6)) * mix(0.96, 1.04, r) * (1.0 + 0.05 * vLump);
+    base = mix(uTip * 0.9, base, mask); // any skin peeking at the face edge matches the fur tips
+    float ndl = dot(n, uLightDir);
+    float diff = pow(clamp(ndl * 0.5 + 0.5, 0.0, 1.0), 2.0);
+    vec3 hemi = mix(uGround, uSky, n.y * 0.5 + 0.5);
+    float ao = mix(0.9, 1.0, h) * mix(0.88, 1.0, smoothstep(0.12, 0.5, (vWP.y - uFeetY) / uScale)); // light skin so fur partings don't read as gray specks
+    ao = mix(1.0, ao, mask); // bare skin at the face edge isn't in the fur's shadow
+    float fresnel = pow(1.0 - max(dot(n, v), 0.0), 4.0);
+    vec3 sheen = uTip * fresnel * (0.25 + 0.35 * clamp(ndl + 0.3, 0.0, 1.0));
+    vec3 col = base * (diff * 0.8 + hemi * 0.26) * ao + sheen * 0.8;
+    gl_FragColor = vec4(col, a);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }`;
+
+const LOOKS = {
+  sand:   { root: 0xD8B088, tip: 0xFAE4C6, face: 0xF3D9C8, blush: 'rgba(240,138,138,', sole: 0xD8BEA4 },
+  purple: { root: 0x7A62D6, tip: 0xD2C4FF, face: 0xF6F0FF, blush: 'rgba(244,150,185,', sole: 0xE3D3C0 },
+};
+const FUR = { root: new THREE.Color(), tip: new THREE.Color(), skin: new THREE.Color() };
+const furMaterials = [], strandMeshes = [];
+
+// ---------- strand fur ----------
+// Real hair strands: thin camera-facing ribbons instanced at points scattered evenly over the
+// surface (no UV grid, so no streaks or seams), bent by gravity and a smooth flow field so
+// neighbours clump into tufts, and lit with Kajiya-Kay hair shading.
+const SEGS = 4;
+const strandGeo = new THREE.InstancedBufferGeometry();
+{
+  const t = [], side = [], idx = [];
+  for (let i = 0; i <= SEGS; i++) { t.push(i / SEGS, i / SEGS); side.push(-1, 1); }
+  for (let i = 0; i < SEGS; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  strandGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Array(t.length * 3).fill(0), 3));
+  strandGeo.setAttribute('aT', new THREE.Float32BufferAttribute(t, 1));
+  strandGeo.setAttribute('aSide', new THREE.Float32BufferAttribute(side, 1));
+  strandGeo.setIndex(idx);
+}
+const strandVert = /* glsl */`
+  attribute float aT, aSide;
+  attribute vec3 aRoot, aNrm;
+  attribute vec4 aRnd;
+  uniform float uLen, uWidth, uTime;
+  varying float vT, vRnd; varying vec3 vTan, vN, vWP;
+  void main() {
+    vec3 wRoot = (modelMatrix * vec4(aRoot, 1.0)).xyz;
+    vec3 wn = normalize(mat3(modelMatrix) * aNrm);
+    vec3 up = abs(wn.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 t1 = normalize(cross(wn, up)), t2 = cross(wn, t1);
+    float ang = aRnd.x * 6.2832;
+    vec3 rt = cos(ang) * t1 + sin(ang) * t2;
+    // smooth flow over the surface: nearby strands lean the same way and gather into tufts
+    vec3 q = aRoot * 26.0;
+    vec3 flow = vec3(sin(q.y + 1.7 * sin(q.z)), sin(q.z + 1.3 * sin(q.x)), sin(q.x + 1.9 * sin(q.y)));
+    flow = normalize(mat3(modelMatrix) * flow) * length(flow); // keep the flow's size independent of Muse's on-screen scale
+    flow -= wn * dot(flow, wn);
+    float L = uLen * aRnd.y;
+    vec3 dir = normalize(wn + rt * 0.3 + flow * 0.3);
+    float sway = sin(uTime * 1.4 + aRoot.y * 9.0 + aRoot.x * 6.0) * 0.06;
+    vec3 bend = vec3(sway, -0.45, sway * 0.5) + flow * 0.15;
+    float t = aT;
+    vec3 p = wRoot + L * (dir * t + bend * t * t);
+    vec3 T = normalize(dir + 2.0 * bend * t);
+    vec3 V = normalize(cameraPosition - p);
+    // strands pointing straight at the camera make cross(T, V) vanish; fall back to a surface tangent
+    vec3 c = cross(T, V);
+    vec3 sideV = dot(c, c) > 1e-6 ? normalize(c) : t1;
+    p += sideV * aSide * uWidth * (1.0 - 0.85 * t) * 0.5;
+    vT = t; vRnd = aRnd.z; vTan = T; vN = wn; vWP = p;
+    gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
+  }`;
+const strandFrag = /* glsl */`
+  uniform vec3 uRoot, uTip, uLightDir, uSky, uGround;
+  uniform float uFeetY, uScale;
+  varying float vT, vRnd; varying vec3 vTan, vN, vWP;
+  void main() {
+    // MSAA can sample just outside a strand and extrapolate vT below 0; pow() of that is NaN (black specks)
+    float t = clamp(vT, 0.0, 1.0);
+    vec3 T = normalize(vTan), N = normalize(vN), L = uLightDir;
+    vec3 V = normalize(cameraPosition - vWP), H = normalize(L + V);
+    float nl = clamp(dot(N, L) * 0.5 + 0.5, 0.0, 1.0);
+    float tl = dot(T, L), th = dot(T, H);
+    float kk = sqrt(max(1.0 - tl * tl, 0.0));
+    float diff = mix(0.4, 1.0, nl * nl) * (0.7 + 0.3 * kk);
+    float spec = pow(sqrt(max(1.0 - th * th, 0.0)), 60.0) * 0.06 * nl;
+    vec3 hemi = mix(uGround, uSky, N.y * 0.5 + 0.5);
+    vec3 base = mix(uRoot, uTip, pow(t, 0.45)) * (0.95 + 0.08 * vRnd);
+    float ao = mix(0.86, 1.0, t) * mix(0.88, 1.0, smoothstep(0.1, 0.5, (vWP.y - uFeetY) / uScale));
+    vec3 col = base * (diff * 0.95 + hemi * 0.45) * ao + spec;
+    gl_FragColor = vec4(col, 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }`;
+
+function addFur(mesh, { len = 0.03, count = 20000, width = 0.0022, face = null } = {}) {
+  // the skin under the fur: the old fur shader at height 0, so it shades like the fur roots
+  const skin = new THREE.ShaderMaterial({
+    vertexShader: furVert, fragmentShader: furFrag,
+    uniforms: {
+      uH: { value: 0 }, uLen: { value: 0 }, uTime: { value: 0 },
+      uDensity: { value: new THREE.Vector2(1, 1) },
+      uFaceOn: { value: face ? 1 : 0 },
+      uFaceC: { value: face ? face.c : new THREE.Vector2() },
+      uFaceR: { value: face ? face.r : new THREE.Vector2(1, 1) },
+      uRoot: { value: FUR.skin }, uTip: { value: FUR.tip },
+      uLightDir: { value: LIGHT_DIR }, uSky: { value: SKY }, uGround: { value: GROUND },
+      uFeetY: FURU.uFeetY, uScale: FURU.uScale,
+    },
+  });
+  mesh.material = skin; mesh.castShadow = true;
+
+  const sampler = new MeshSurfaceSampler(new THREE.Mesh(mesh.geometry)).build();
+  const roots = new Float32Array(count * 3), nrms = new Float32Array(count * 3), rnd = new Float32Array(count * 4);
+  const p = new THREE.Vector3(), n = new THREE.Vector3();
+  let k = 0;
+  while (k < count) {
+    sampler.sample(p, n);
+    let lenK = 1;
+    if (face && p.z > 0) { // keep the face clear; shorten strands at its edge into a soft fringe
+      const qx = Math.abs((p.x - face.c.x) / face.r.x), qy = Math.abs((p.y - face.c.y) / face.r.y);
+      const e = Math.cbrt(qx ** 3 + qy ** 3);
+      if (e < 0.97) continue;
+      lenK = THREE.MathUtils.smoothstep(e, 0.9, 1.05); // full-length fringe that overlaps the face edge
+    }
+    roots.set([p.x, p.y, p.z], k * 3); nrms.set([n.x, n.y, n.z], k * 3);
+    rnd.set([Math.random(), (0.6 + 0.4 * Math.random()) * lenK, Math.random(), Math.random()], k * 4);
+    k++;
+  }
+  const g = strandGeo.clone();
+  g.setAttribute('aRoot', new THREE.InstancedBufferAttribute(roots, 3));
+  g.setAttribute('aNrm', new THREE.InstancedBufferAttribute(nrms, 3));
+  g.setAttribute('aRnd', new THREE.InstancedBufferAttribute(rnd, 4));
+  g.instanceCount = count;
+  const mat = new THREE.ShaderMaterial({
+    vertexShader: strandVert, fragmentShader: strandFrag, side: THREE.DoubleSide,
+    uniforms: {
+      uLen: { value: len }, uWidth: { value: width }, uTime: { value: 0 },
+      uRoot: { value: FUR.root }, uTip: { value: FUR.tip },
+      uLightDir: { value: LIGHT_DIR }, uSky: { value: SKY }, uGround: { value: GROUND },
+      uFeetY: FURU.uFeetY, uScale: FURU.uScale,
+    },
+  });
+  furMaterials.push(mat);
+  const strands = new THREE.Mesh(g, mat);
+  strands.frustumCulled = false; // instance positions are built in the shader
+  strandMeshes.push(strands);
+  mesh.add(strands);
+}
+
+// lathe with arc-length-spaced rows, so fur strands stay round instead of stretching
+function lathe(points, rows, segs) {
+  // LatheGeometry's UV seam starts facing +z; turn it to the back so it never shows from the front
+  return new THREE.LatheGeometry(new THREE.SplineCurve(points).getSpacedPoints(rows), segs).rotateY(Math.PI);
+}
+function capsuleGeo(r, len) {
+  const pts = [];
+  for (let i = 0; i <= 16; i++) { const a = -Math.PI / 2 + i / 16 * Math.PI / 2; pts.push(new THREE.Vector2(Math.max(Math.cos(a) * r, 0.001), Math.sin(a) * r - len / 2)); }
+  for (let i = 0; i <= 16; i++) { const a = i / 16 * Math.PI / 2; pts.push(new THREE.Vector2(Math.max(Math.cos(a) * r, 0.001), Math.sin(a) * r + len / 2)); }
+  return lathe(pts, 40, 48);
+}
+
+// ---------- the character (y up, ground at y=0, faces +z, total height 1.0) ----------
+const muse = new THREE.Group();
+const bodyRig = new THREE.Group(); // squash/stretch pivot at the feet
+muse.add(bodyRig);
+scene.add(muse);
+
+// tall bean / gumdrop: widest at the hips, gently narrowing into a domed hood, no neck
+const bodyGeo = lathe([
+  new THREE.Vector2(0.001, 0.13), new THREE.Vector2(0.2, 0.14), new THREE.Vector2(0.3, 0.19),
+  new THREE.Vector2(0.33, 0.29), new THREE.Vector2(0.32, 0.41), new THREE.Vector2(0.29, 0.53),
+  new THREE.Vector2(0.265, 0.62), new THREE.Vector2(0.262, 0.72), new THREE.Vector2(0.248, 0.83),
+  new THREE.Vector2(0.2, 0.93), new THREE.Vector2(0.1, 0.985), new THREE.Vector2(0.001, 1.0),
+], 72, 96);
+bodyGeo.scale(1, 1, 0.9);
+bodyGeo.computeVertexNormals();
+const body = new THREE.Mesh(bodyGeo);
+bodyRig.add(body);
+bodyRig.updateMatrixWorld(true);
+
+// big peach face set into the hood; faces straight ahead with a slight upward tilt
+const FACE_Y = 0.765, FACE_RX = 0.21, FACE_RY = 0.152;
+const ray = new THREE.Raycaster();
+ray.set(new THREE.Vector3(0, FACE_Y, 3), new THREE.Vector3(0, 0, -1));
+const surfZ = ray.intersectObject(body, false)[0].point.z;
+const faceMat = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, emissiveIntensity: 0.45, toneMapped: false });
+// curve the panel to follow the head, so its edges tuck into the fur instead of standing proud
+const PANEL_D = 0.1;
+const panelGeo = new THREE.SphereGeometry(1, 64, 32);
+{
+  const pos = panelGeo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const a = Math.atan2(pos.getY(i), pos.getX(i));
+    const rs = Math.pow(Math.abs(Math.cos(a)) ** 3 + Math.abs(Math.sin(a)) ** 3, -1 / 3);
+    pos.setX(i, pos.getX(i) * rs); pos.setY(i, pos.getY(i) * rs);
+    const wx = pos.getX(i) * FACE_RX, wy = pos.getY(i) * FACE_RY;
+    pos.setZ(i, pos.getZ(i) - (wx * wx * 0.9 + wy * wy * 0.25) / PANEL_D);
+  }
+  panelGeo.computeVertexNormals();
+}
+const panel = new THREE.Mesh(panelGeo, faceMat);
+panel.scale.set(FACE_RX, FACE_RY, PANEL_D);
+panel.rotation.x = 0.06;
+panel.position.set(0, FACE_Y, surfZ - 0.062);
+panel.castShadow = true;
+bodyRig.add(panel);
+panel.updateMatrixWorld(true);
+
+addFur(body, { len: 0.04, count: 300000, face: { c: new THREE.Vector2(0, FACE_Y + 0.022), r: new THREE.Vector2(FACE_RX * 0.86, FACE_RY * 0.72) } });
+
+function onPanel(x, y, lift = 0) {
+  ray.set(new THREE.Vector3(x, y, 3), new THREE.Vector3(0, 0, -1));
+  const h = ray.intersectObject(panel, false)[0];
+  const n = h.face.normal.clone().transformDirection(panel.matrixWorld);
+  return { p: h.point.addScaledVector(n, lift), n };
+}
+const eyeMat = new THREE.MeshPhysicalMaterial({ color: 0x0B0908, roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.05 });
+const eyes = [-1, 1].map(s => {
+  const { p, n } = onPanel(s * 0.1, FACE_Y + 0.012, -0.007);
+  const e = new THREE.Mesh(new THREE.SphereGeometry(0.028, 32, 16), eyeMat);
+  e.position.copy(p);
+  e.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+  e.scale.set(1, 1, 0.6);
+  const glint = new THREE.Mesh(new THREE.SphereGeometry(0.0065, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  glint.position.set(0.008, 0.009, 0.022); // eye-local, so it blinks along with the eye
+  e.add(glint);
+  bodyRig.add(e);
+  return e;
+});
+{
+  // the smile is a tube traced point by point onto the curved face, so none of it sinks into the surface
+  const R = 0.03, bottom = FACE_Y - 0.037, half = Math.PI * 0.38, pts = [];
+  for (let i = 0; i <= 24; i++) {
+    const a = -half + (2 * half * i) / 24;
+    pts.push(onPanel(R * Math.sin(a), bottom + R * (1 - Math.cos(a)), 0.0012).p);
+  }
+  const smileMat = new THREE.MeshStandardMaterial({ color: 0x1E1814, roughness: 0.6 });
+  const TUBE = 0.0034;
+  bodyRig.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 48, TUBE, 10), smileMat));
+  for (const end of [pts[0], pts[pts.length - 1]]) { // rounded caps
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(TUBE, 12, 8), smileMat);
+    cap.position.copy(end);
+    bodyRig.add(cap);
+  }
+}
+// blush is painted into the face panel's own texture so it follows the curved surface
+function faceTexture(L, boost = 1) {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 512;
+  const g = c.getContext('2d');
+  g.fillStyle = '#' + new THREE.Color(L.face).getHexString(THREE.SRGBColorSpace);
+  g.fillRect(0, 0, 1024, 512);
+  // SphereGeometry UVs: the front (+z) is u = 0.25; blush sits at x = ±0.63, y = -0.18 of the panel radius
+  for (const s of [-1, 1]) {
+    const xl = s * 0.6, yl = -0.22, a = Math.atan2(yl, xl);
+    const rs = Math.pow(Math.abs(Math.cos(a)) ** 3 + Math.abs(Math.sin(a)) ** 3, -1 / 3);
+    const th = Math.acos(yl / rs), u = 0.25 + Math.asin(xl / rs / Math.sin(th)) / (2 * Math.PI), v = 1 - th / Math.PI;
+    g.save();
+    g.translate(u * 1024, (1 - v) * 512);
+    g.scale(1, 0.8);
+    const grd = g.createRadialGradient(0, 0, 0, 0, 0, 46);
+    grd.addColorStop(0, L.blush + Math.min(1, 0.8 * boost).toFixed(2) + ')'); grd.addColorStop(0.5, L.blush + Math.min(1, 0.45 * boost).toFixed(2) + ')'); grd.addColorStop(1, L.blush + '0)');
+    g.fillStyle = grd; g.beginPath(); g.arc(0, 0, 46, 0, Math.PI * 2); g.fill();
+    g.restore();
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
+}
+
+// long mitten arms hanging close to the sides, pivoting at the shoulder
+const arms = [-1, 1].map(s => {
+  const pivot = new THREE.Group();
+  pivot.position.set(s * 0.27, 0.62, 0.02);
+  pivot.rotation.z = s * 0.3;
+  const len = 0.28; // both arms full length so they can rest at the sides
+  const geo = capsuleGeo(0.07, len);
+  { // mitten: slimmer at the shoulder, fuller toward the hand
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const k = THREE.MathUtils.clamp(0.5 - pos.getY(i) / (len + 0.14), 0, 1);
+      const w = 0.88 + 0.28 * k;
+      pos.setX(i, pos.getX(i) * w); pos.setZ(i, pos.getZ(i) * w * 0.9);
+    }
+    geo.computeVertexNormals();
+  }
+  const arm = new THREE.Mesh(geo);
+  arm.position.y = -(len / 2 + 0.05);
+  pivot.add(arm);
+  addFur(arm, { len: 0.034, count: 32000 });
+  bodyRig.add(pivot);
+  return pivot;
+});
+
+// thick stubby legs with tan suede soles
+const soleMat = new THREE.MeshStandardMaterial({ roughness: 1 });
+const legs = [-1, 1].map(s => {
+  const hip = new THREE.Group();
+  hip.position.set(s * 0.125, 0.27, 0.0);
+  const leg = new THREE.Mesh(capsuleGeo(0.11, 0.05));
+  leg.position.y = -0.135;
+  addFur(leg, { len: 0.03, count: 24000 });
+  hip.add(leg);
+  const sole = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), soleMat);
+  sole.scale.set(0.095, 0.02, 0.1);
+  sole.position.set(0, -0.255, 0.0);
+  sole.castShadow = true;
+  hip.add(sole);
+  bodyRig.add(hip);
+  return hip;
+});
+
+function setLook(name) {
+  const L = LOOKS[name];
+  FUR.root.setHex(L.root); FUR.tip.setHex(L.tip); FUR.skin.copy(FUR.root).lerp(FUR.tip, 0.85);
+  const ft = faceTexture(L);
+  faceMat.map = ft; faceMat.emissiveMap = ft;
+  faceMat.color.set(0xffffff); faceMat.emissive.set(0xffffff);
+  faceMat.needsUpdate = true;
+  soleMat.color.setHex(L.sole);
+  document.querySelectorAll('#swatches button').forEach(b => b.setAttribute('aria-pressed', b.dataset.look === name));
+}
+document.querySelectorAll('#swatches button').forEach(b => b.addEventListener('click', () => setLook(b.dataset.look)));
+setLook('sand');
+
+// =====================================================================================
+//  AR LAYER: your mirrored webcam is the screen; Muse sits on your hand.
+//  One clear hand pose = one reaction. A pose counts after you hold it for ~⅓ s.
+// =====================================================================================
+setLook('purple');
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (e0, e1, x) => { const k = clamp((x - e0) / (e1 - e0), 0, 1); return k * k * (3 - 2 * k); };
+const damp = (a, b, rate, dt) => lerp(a, b, 1 - Math.exp(-rate * dt));
+class Spring { constructor(k, d, x = 0) { this.k = k; this.d = d; this.x = x; this.v = 0; this.t = x; }
+  step(dt) { this.v += (this.k * (this.t - this.x) - this.d * this.v) * dt; this.x += this.v * dt; return this.x; } }
+function toast(msg, ms = 2600) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._h); toast._h = setTimeout(() => t.classList.remove('on'), ms); }
+
+// ---------- the poses ----------
+// anchor: which hand landmarks Muse stands on (it uses the highest one; 'mid' = between them)
+const POSES = {
+  Open_Palm:   { emoji: '✋', name: 'finger hop! push to clap', anchor: [8, 12, 16, 20] },
+  Closed_Fist: { emoji: '✊', name: 'sleepy…',   anchor: [5, 9, 13, 17] },
+  Pointing_Up: { emoji: '☝️', name: 'twirl',     anchor: [8] },
+  Thumb_Up:    { emoji: '👍', name: 'dance!',    anchor: [4] },
+  Victory:     { emoji: '✌️', name: 'pose!',     anchor: [8, 12], mid: true },
+  ILoveYou:    { emoji: '🤟', name: 'love',      anchor: [8, 20], mid: true },
+  Thumb_Down:  { emoji: '👎', name: 'sad',       anchor: [5, 9, 13, 17] },
+};
+
+// ---------- sound ----------
+let ac = null, master = null, muted = false;
+function initAudio() { if (ac) return; ac = new (window.AudioContext || window.webkitAudioContext)(); master = ac.createGain(); master.gain.value = 0.8; master.connect(ac.destination); }
+function tone(f0, f1, dur, type = 'sine', vol = 0.1, at = 0) {
+  if (!ac || muted) return;
+  const n = ac.currentTime + at, o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, n); o.frequency.exponentialRampToValueAtTime(f1, n + dur);
+  g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(vol, n + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+  o.connect(g); g.connect(master); o.start(n); o.stop(n + dur + 0.05);
+}
+function noise({ dur, type = 'lowpass', f0, f1 = f0, q = 0.7, vol, attack = 0.005, at = 0 }) {
+  if (!ac || muted) return;
+  const n = ac.currentTime + at, b = ac.createBuffer(1, Math.ceil(ac.sampleRate * dur), ac.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+  src.buffer = b; f.type = type; f.Q.value = q;
+  f.frequency.setValueAtTime(f0, n); f.frequency.exponentialRampToValueAtTime(f1, n + dur);
+  g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(vol, n + attack); g.gain.exponentialRampToValueAtTime(0.0001, n + dur);
+  src.connect(f); f.connect(g); g.connect(master); src.start(n); src.stop(n + dur + 0.05);
+}
+function thump() { if (!ac || muted) return; const n = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.frequency.setValueAtTime(110, n); o.frequency.exponentialRampToValueAtTime(38, n + 0.45); g.gain.setValueAtTime(0.0001, n); g.gain.exponentialRampToValueAtTime(0.3, n + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, n + 0.6); o.connect(g); g.connect(master); o.start(n); o.stop(n + 0.65); }
+const sfx = {
+  hop: () => tone(330, 660, 0.14, 'sine', 0.08),
+  land: () => noise({ dur: 0.08, f0: 700, f1: 200, vol: 0.12 }),
+  mew: () => { tone(560, 900, 0.16, 'triangle', 0.07); tone(900, 620, 0.22, 'triangle', 0.06, 0.16); },
+  note: () => tone(880 * [1, 1.25, 1.5, 2][Math.floor(Math.random() * 4)], 890, 0.12, 'sine', 0.035),
+  snore: () => noise({ dur: 0.9, type: 'bandpass', f0: 180, f1: 120, q: 2, vol: 0.05, attack: 0.4 }),
+  sad: () => { tone(520, 380, 0.35, 'triangle', 0.06); tone(390, 300, 0.45, 'triangle', 0.05, 0.3); },
+  love: () => { tone(660, 990, 0.18, 'sine', 0.06); tone(990, 1320, 0.25, 'sine', 0.05, 0.15); },
+  twirl: () => tone(700, 1400, 0.4, 'sine', 0.04),
+  whoosh: () => noise({ dur: 0.5, type: 'bandpass', f0: 500, f1: 2200, q: 1.4, vol: 0.05, attack: 0.15 }),
+  boom: () => { thump(); noise({ dur: 0.9, f0: 900, f1: 120, vol: 0.25 }); for (let k = 0; k < 6; k++) noise({ dur: 0.03, type: 'highpass', f0: 2500, vol: 0.03 + Math.random() * 0.03, attack: 0.002, at: 0.3 + Math.random() * 0.8 }); },
+};
+addEventListener('keydown', e => { const k = e.key.toLowerCase(); if (k === 'h') document.body.classList.toggle('clean'); if (k === 's') { muted = !muted; toast(muted ? 'Sound off' : 'Sound on'); } });
+
+// ---------- fur follows Muse's on-screen size ----------
+const strandBase = strandMeshes.map(m => ({ len: m.material.uniforms.uLen.value, w: m.material.uniforms.uWidth.value }));
+let lod = 1;
+
+// ---------- face extras ----------
+const mouthPt = onPanel(0, FACE_Y - 0.031, 0.0008);
+const mouthO = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), new THREE.MeshStandardMaterial({ color: 0x5a2230, roughness: 0.6 }));
+mouthO.position.copy(mouthPt.p); mouthO.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), mouthPt.n);
+mouthO.scale.set(0.022, 0.0001, 0.006); bodyRig.add(mouthO);
+const eyeBase = eyes.map(e => e.position.clone());
+const faceTex = {}; let blushOn = false;
+function setBlush(on) { if (on === blushOn) return; blushOn = on; const tx = (faceTex[on] ||= faceTexture(LOOKS.purple, on ? 1.8 : 1)); faceMat.map = tx; faceMat.emissiveMap = tx; faceMat.needsUpdate = true; }
+const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.2), new THREE.MeshBasicMaterial({ map: radialTexture([[0, 'rgba(20,10,30,.5)'], [0.5, 'rgba(20,10,30,.18)'], [1, 'rgba(20,10,30,0)']]), transparent: true, depthWrite: false }));
+shadow.position.z = -800; scene.add(shadow);
+
+// ---------- sprites (screen px) ----------
+function spriteTex(draw) { const c = document.createElement('canvas'); c.width = c.height = 128; draw(c.getContext('2d')); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; }
+const TX = {
+  heart: spriteTex(x => { const gr = x.createLinearGradient(0, 0, 0, 128); gr.addColorStop(0, '#ff9ec4'); gr.addColorStop(1, '#e86a9a'); x.fillStyle = gr; x.beginPath(); x.moveTo(64, 112); x.bezierCurveTo(10, 76, 6, 34, 36, 22); x.bezierCurveTo(52, 16, 62, 28, 64, 38); x.bezierCurveTo(66, 28, 76, 16, 92, 22); x.bezierCurveTo(122, 34, 118, 76, 64, 112); x.fill(); }),
+  note: spriteTex(x => { x.font = '700 104px system-ui,sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#fff'; x.shadowColor = 'rgba(143,116,224,.9)'; x.shadowBlur = 14; x.fillText('♪', 64, 70); }),
+  spark: spriteTex(x => { const g = x.createRadialGradient(64, 64, 0, 64, 64, 64); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.2, 'rgba(230,215,255,.9)'); g.addColorStop(1, 'rgba(200,170,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 128, 128); }),
+  z: spriteTex(x => { x.font = '800 100px ui-rounded,system-ui,sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#fff'; x.shadowColor = 'rgba(120,100,200,.9)'; x.shadowBlur = 12; x.fillText('z', 64, 70); }),
+  cloud: spriteTex(x => { x.fillStyle = '#8f95a8'; for (const [cx, cy, r] of [[40, 72, 26], [64, 58, 32], [90, 70, 26], [64, 80, 26]]) { x.beginPath(); x.arc(cx, cy, r, 0, 7); x.fill(); } }),
+  drop: spriteTex(x => { x.fillStyle = '#7fb3ff'; x.beginPath(); x.moveTo(64, 20); x.quadraticCurveTo(96, 80, 64, 104); x.quadraticCurveTo(32, 80, 64, 20); x.fill(); }),
+};
+const sprites = [];
+function emit(tex, x, y, vx, vy, life, size, opts = {}) {
+  let s = sprites.find(s => s.life <= 0);
+  if (!s) { s = { m: new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false })) }; scene.add(s.m); sprites.push(s); }
+  s.m.material.map = tex; s.m.material.needsUpdate = true; s.m.position.z = opts.z ?? 500;
+  Object.assign(s, { x, y, vx, vy, life, max: life, size, ph: Math.random() * 6, g: opts.g || 0, sway: opts.sway ?? 40, fade: opts.fade ?? true }); s.m.visible = true;
+  return s;
+}
+function updateSprites(dt, t) {
+  for (const s of sprites) {
+    if (s.life <= 0) { s.m.visible = false; continue; }
+    s.life -= dt; s.vy += s.g * dt; s.vx += Math.sin(t * 4 + s.ph) * dt * s.sway; s.x += s.vx * dt; s.y += s.vy * dt;
+    const k = s.life / s.max, sc = s.size * (s.fade ? 0.8 + (1 - k) * 0.5 : 1);
+    s.m.position.set(s.x - W / 2, H / 2 - s.y, s.m.position.z); s.m.scale.set(sc, sc, 1); s.m.material.opacity = s.fade ? smooth(0, 0.35, k) * smooth(1, 0.85, k) : smooth(0, 0.2, k);
+  }
+}
+
+// ---------- fireworks (screen px) ----------
+const FW_MAX = 3000, FW_COLORS = [0xff4d6d, 0xffb703, 0x9b5de5, 0x4cc9f0, 0xf15bb5, 0xfee440, 0x00f5d4, 0xff7a00].map(c => new THREE.Color(c));
+const fwPos = new Float32Array(FW_MAX * 3), fwCol = new Float32Array(FW_MAX * 3), fwVel = new Float32Array(FW_MAX * 3), fwLife = new Float32Array(FW_MAX), fwMax = new Float32Array(FW_MAX), fwBase = new Float32Array(FW_MAX * 3), fwKind = new Uint8Array(FW_MAX);
+const fwGeo = new THREE.BufferGeometry();
+fwGeo.setAttribute('position', new THREE.BufferAttribute(fwPos, 3)); fwGeo.setAttribute('color', new THREE.BufferAttribute(fwCol, 3));
+// The canvas is transparent over the webcam. Plain additive blending would add alpha too and paint idle or
+// fading sparks as black dots, so the sparks write premultiplied glow (alpha = brightness) and dark ones are dropped.
+const fwPoints = new THREE.Points(fwGeo, new THREE.ShaderMaterial({
+  uniforms: { map: { value: TX.spark }, uSize: { value: 9 * Math.min(devicePixelRatio, 2) } },
+  vertexColors: true, transparent: true, depthWrite: false,
+  vertexShader: 'uniform float uSize; varying vec3 vC; void main() { vC = color; gl_PointSize = uSize; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: 'uniform sampler2D map; varying vec3 vC; void main() { vec3 c = vC * texture2D(map, gl_PointCoord).a; float a = clamp(max(c.r, max(c.g, c.b)), 0.0, 1.0); if (a < 0.004) discard; gl_FragColor = vec4(min(c, vec3(a)), a); }',
+  blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+}));
+fwPoints.frustumCulled = false; fwPoints.position.z = -600; scene.add(fwPoints);
+let fwNext = 0; const rockets = []; let lastBurst = -1e9, night = 0;
+function fwSpawn(x, y, vx, vy, life, col, kind) { const i = fwNext; fwNext = (fwNext + 1) % FW_MAX; fwPos.set([x - W / 2, H / 2 - y, 0], i * 3); fwVel.set([vx, -vy, 0], i * 3); fwLife[i] = fwMax[i] = life; fwKind[i] = kind; fwBase.set([col.r, col.g, col.b], i * 3); }
+function launch(tx, ty) { rockets.push({ x0: tx + (Math.random() - 0.5) * 80, y0: H + 10, tx, ty, t: 0, dur: 0.55, col: FW_COLORS[Math.floor(Math.random() * FW_COLORS.length)] }); sfx.whoosh(); }
+const _white = new THREE.Color(1, 0.95, 0.8);
+function updateFireworks(dt, size) {
+  for (let r = rockets.length - 1; r >= 0; r--) {
+    const k = rockets[r]; k.t += dt; const u = Math.min(1, k.t / k.dur), e = 1 - Math.pow(1 - u, 2);
+    fwSpawn(lerp(k.x0, k.tx, e), lerp(k.y0, k.ty, e), (Math.random() - 0.5) * 20, 40, 0.35, _white, 0);
+    if (u >= 1) {
+      const col2 = FW_COLORS[Math.floor(Math.random() * FW_COLORS.length)], sp = size * 2.4;
+      for (let n = 0; n < 220; n++) { const a = Math.random() * Math.PI * 2, v = sp * (0.6 + Math.random() * 0.4); fwSpawn(k.tx, k.ty, Math.cos(a) * v, Math.sin(a) * v, 1.2 + Math.random() * 0.7, Math.random() < 0.7 ? k.col : col2, Math.random() < 0.25 ? 2 : 1); }
+      sfx.boom(); lastBurst = performance.now(); rockets.splice(r, 1);
+    }
+  }
+  const gy = size * 1.6;
+  for (let i = 0; i < FW_MAX; i++) {
+    if (fwLife[i] <= 0) { fwCol[i * 3] = fwCol[i * 3 + 1] = fwCol[i * 3 + 2] = 0; continue; }
+    fwLife[i] -= dt; const drag = Math.exp(-dt * 1.8);
+    fwVel[i * 3] *= drag; fwVel[i * 3 + 1] = fwVel[i * 3 + 1] * drag - gy * dt;
+    fwPos[i * 3] += fwVel[i * 3] * dt; fwPos[i * 3 + 1] += fwVel[i * 3 + 1] * dt;
+    let a = Math.max(0, fwLife[i] / fwMax[i]); a *= a; if (fwKind[i] === 2) a *= Math.random() < 0.5 ? 1 : 0.3;
+    const hot = fwKind[i] === 0 ? 1 : Math.max(0, (fwLife[i] / fwMax[i] - 0.8) * 5);
+    for (let c = 0; c < 3; c++) fwCol[i * 3 + c] = (fwBase[i * 3 + c] + (1 - fwBase[i * 3 + c]) * hot) * a * 1.6;
+  }
+  fwGeo.attributes.position.needsUpdate = true; fwGeo.attributes.color.needsUpdate = true;
+  const dark = rockets.length || performance.now() - lastBurst < 2200 ? 1 : 0;
+  night = damp(night, dark, dark ? 4 : 1.2, dt); $('night').style.opacity = (night * 0.6).toFixed(3);
+}
+
+// ---------- hand tracking: MediaPipe Gesture Recognizer (one hand) ----------
+const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const GESTURE_MODEL = 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task';
+const video = $('cam');
+let recognizer = null, lastVT = -1;
+async function startCamera() {
+  initAudio();
+  try {
+    video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false });
+    await video.play(); $('start').remove();
+    const vision = await import(`${MP}/vision_bundle.mjs`);
+    const fs = await vision.FilesetResolver.forVisionTasks(`${MP}/wasm`);
+    const opt = d => ({ baseOptions: { modelAssetPath: GESTURE_MODEL, delegate: d }, runningMode: 'VIDEO', numHands: 1, minHandDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    try { recognizer = await vision.GestureRecognizer.createFromOptions(fs, opt('GPU')); } catch { recognizer = await vision.GestureRecognizer.createFromOptions(fs, opt('CPU')); }
+    toast('Show Muse your hand ✋');
+  } catch (err) { console.warn(err); toast('Camera unavailable: ' + (err.name || err.message), 6000); }
+}
+$('bGo').onclick = startCamera;
+function vidToScreen(p) { const vw = video.videoWidth || 1280, vh = video.videoHeight || 720, s = Math.max(W / vw, H / vh); return { x: W - (p.x * vw * s + (W - vw * s) / 2), y: p.y * vh * s + (H - vh * s) / 2 }; }
+const D = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+let hand = null; // { pts[21] screen px, palm, gesture, score }
+function updateHand(now) {
+  if (!(recognizer && video.readyState >= 2 && video.currentTime !== lastVT)) return;
+  lastVT = video.currentTime;
+  let res = null; try { res = recognizer.recognizeForVideo(video, now); } catch { return; }
+  const lm = res.landmarks?.[0];
+  if (!lm) { hand = null; return; }
+  const pts = lm.map(vidToScreen), g = res.gestures?.[0]?.[0];
+  if (!hand) hand = { pts: pts.map(p => ({ ...p })) }; else hand.pts.forEach((p, k) => { p.x = lerp(p.x, pts[k].x, 0.65); p.y = lerp(p.y, pts[k].y, 0.65); });
+  hand.palm = Math.max(20, D(hand.pts[0], hand.pts[9]));
+  hand.size = (hand.palm + D(hand.pts[5], hand.pts[17]) * 1.4) / 2; // grows as the hand comes toward the camera
+  // Double-check the look-alike poses (☝️ twirl, ✌️ pose, 👍 dance) against the finger shapes, and ask for more
+  // confidence on them, so one doesn't get read as another mid-way between shapes.
+  const P = hand.pts, ext = [[8, 5], [12, 9], [16, 13], [20, 17]].map(([t, m]) => D(P[t], P[m]) / hand.palm);
+  const up = e => e > 0.7, down = e => e < 0.55;
+  const thumbTop = P[4].y < Math.min(P[8].y, P[12].y, P[16].y, P[20].y, P[5].y) - hand.palm * 0.15;
+  const SHAPE = {
+    Pointing_Up: () => up(ext[0]) && down(ext[1]) && down(ext[2]) && down(ext[3]) && P[8].y < P[5].y - hand.palm * 0.4, // one finger, pointing up
+    Victory: () => up(ext[0]) && up(ext[1]) && down(ext[2]) && down(ext[3]) && D(P[8], P[12]) > hand.palm * 0.3,       // two fingers, spread apart
+    Thumb_Up: () => thumbTop && down(ext[0]) && down(ext[1]),                                                              // thumb on top, fingers curled
+  };
+  let gesture = g && g.score > 0.55 ? g.categoryName : 'None';
+  if (SHAPE[gesture] && (g.score < 0.7 || !SHAPE[gesture]())) gesture = 'None';
+  hand.gesture = gesture;
+}
+
+// ---------- Muse state ----------
+const M = {
+  x: innerWidth / 2, y: innerHeight - 40, vy: 0, mode: 'floor', hop: null, pose: null, cand: null, candT: 0, noneT: 0, poseT: 0,
+  size: new Spring(60, 14, innerHeight * 0.24), sx: new Spring(150, 10, 1), sy: new Spring(150, 10, 1), lean: new Spring(60, 8),
+  arms: [new Spring(120, 13), new Spring(120, 13)], armZ: [0, 0], look: { x: 0, y: 0 }, spin: 0, eye: new Spring(160, 16, 1), mouth: 0,
+  blinkT: 0, nextBlink: 2, waveT: 0, nextWave: 3, fxT: 0, prev: null, jumpY: 0, jumpV: 0, fistAt: -1e9, cheerT: 0, minSize: 0, clapCD: 0, tipIdx: 1, tipDir: 1, hopTimer: 0.6,
+};
+const floorY = () => H - Math.max(24, H * 0.035);
+const HOP_TIPS = [8, 12, 16, 20];
+function anchorFor(pose) {
+  if (!hand) return null;
+  if (pose === 'Open_Palm') { const tip = hand.pts[HOP_TIPS[M.tipIdx]]; return { x: tip.x, y: tip.y - hand.palm * 0.06 }; } // ✋ one fingertip at a time
+  const P = POSES[pose] || POSES.Open_Palm, pts = P.anchor.map(i => hand.pts[i]);
+  if (P.mid) { const x = pts.reduce((s, p) => s + p.x, 0) / pts.length, y = Math.min(...pts.map(p => p.y)); return { x, y: y - hand.palm * 0.06 }; }
+  const top = pts.reduce((a, b) => (b.y < a.y ? b : a)); return { x: top.x, y: top.y - hand.palm * (pose === 'Closed_Fist' || pose === 'Thumb_Down' ? 0.1 : 0.06) };
+}
+function flashLegend(key) { const li = document.querySelector(`#legend li[data-p="${key}"]`); if (!li) return; li.classList.add('on'); setTimeout(() => li.classList.toggle('on', M.pose === key), 1500); }
+function setPose(p) {
+  if (p === M.pose) return;
+  M.pose = p; M.poseT = 0; M.fxT = 0; if (hand) M.minSize = hand.size;
+  const P = POSES[p]; $('pose').innerHTML = P ? `<span>${P.emoji}</span>${P.name}` : '';
+  $('pose').classList.toggle('on', !!P);
+  document.querySelectorAll('#legend li').forEach(li => li.classList.toggle('on', li.dataset.p === p));
+  ({ Closed_Fist: sfx.snore, Pointing_Up: sfx.twirl, Thumb_Up: sfx.note, ILoveYou: sfx.love, Thumb_Down: sfx.sad, Open_Palm: sfx.mew }[p] || (() => {}))();
+}
+
+// ---------- adaptive quality ----------
+let perfFrames = 0, perfTime = 0;
+function checkPerf(dt) {
+  if (document.visibilityState !== 'visible' || dt > 0.25 || lod < 0.3) return;
+  perfFrames++; perfTime += dt; if (perfFrames < 45) return;
+  const avg = perfTime / perfFrames; perfFrames = 0; perfTime = 0; if (avg < 0.024) return;
+  lod *= 0.6; for (const m of strandMeshes) m.geometry.instanceCount = Math.floor(m.geometry.attributes.aRoot.count * lod);
+}
+
+// ---------- main loop ----------
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const rawDt = clock.getDelta(), dt = Math.min(rawDt, 0.05), t = clock.elapsedTime, now = performance.now();
+  checkPerf(rawDt); updateHand(now);
+  for (const m of furMaterials) m.uniforms.uTime.value = t;
+  const size = M.size.x;
+
+  // ---- which pose? (must be held ~⅓ s; brief "None" frames keep the current pose) ----
+  if (hand) {
+    const g = hand.gesture;
+    if (POSES[g]) { M.noneT = 0; if (g === M.cand) M.candT += dt; else { M.cand = g; M.candT = 0; } const need = ['Pointing_Up', 'Victory', 'Thumb_Up'].includes(g) ? 0.45 : 0.3; if (M.candT > need || (!M.pose && M.candT > 0.1)) setPose(g); }
+    else { M.noneT += dt; if (M.noneT > 0.8 && M.pose !== 'Open_Palm') setPose('Open_Palm'); }
+  } else if (M.pose) setPose(null);
+  M.poseT += dt;
+  // ✊ → 🖐 fireworks, the same gesture as in muse-pet: a fist, then open your hand within ~0.7 s
+  if (hand && hand.gesture === 'Closed_Fist') M.fistAt = now;
+  if (hand && hand.gesture === 'Open_Palm' && now - M.fistAt < 700) {
+    M.fistAt = -1e9; M.cheerT = 2.6; M.jumpV = Math.max(M.jumpV, size * 3); M.minSize = hand.size; M.clapCD = 1.2;
+    for (let k = 0; k < 3; k++) setTimeout(() => launch(clamp(M.x + (Math.random() - 0.5) * size * 2.6, 60, W - 60), clamp(M.y - size * (1.3 + Math.random() * 0.9), 60, H)), k * 260);
+    setPose('Open_Palm'); flashLegend('FW');
+  }
+
+  // ---- where Muse goes: onto your hand (hopping when the spot jumps), or the floor ----
+  const target = hand ? anchorFor(M.pose || 'Open_Palm') : null;
+  if (target) {
+    M.size.t = hand.palm * 1.5;
+    if (M.mode === 'hop') {
+      const hp = M.hop; hp.t += dt; const u = Math.min(1, hp.t / hp.dur), e = u * u * (3 - 2 * u);
+      M.x = lerp(hp.fx, target.x, e); M.y = lerp(hp.fy, target.y, e) - Math.sin(u * Math.PI) * size * (M.pose === 'Open_Palm' ? 0.35 : 0.55);
+      if (u >= 1) { M.mode = 'hand'; M.sy.v -= 3; sfx.land(); }
+    } else if (M.mode !== 'hand' || D(target, M) > size * 0.45) { M.mode = 'hop'; M.hop = { t: 0, dur: 0.32, fx: M.x, fy: M.y }; sfx.hop(); }
+    else {
+      const vx = M.prev ? (target.x - M.prev.x) / dt : 0;
+      M.x = damp(M.x, target.x, 26, dt); M.y = damp(M.y, target.y, 26, dt);
+      M.lean.t = clamp(-vx / (size * 5), -0.4, 0.4); // inertia
+    }
+    M.prev = { ...target };
+  } else {
+    if (M.mode !== 'floor') { M.mode = 'fall'; }
+    if (M.mode === 'fall') { M.vy += size * 9 * dt; M.y += M.vy * dt; if (M.y >= floorY()) { M.y = floorY(); M.vy = 0; M.mode = 'floor'; M.sy.v -= 3; sfx.land(); } }
+    else { M.y = damp(M.y, floorY(), 10, dt); M.x = damp(M.x, clamp(M.x, size, W - size), 2, dt); }
+    M.size.t = H * 0.24; M.lean.t = 0; M.prev = null;
+  }
+
+  // ---- behaviour per pose (defaults first) ----
+  let sxT = 1, syT = 1 + Math.sin(t * 2) * 0.012, armL = 0.15, armR = 0.15, eyeT = 1, mouth = 0, spinY = M.look.x * 0.25, bob = 0, tilt = 0, legAmt = 0, closedHappy = 0, blush = false, wink = 0;
+  M.armZ[0] = M.armZ[1] = 0;
+  const pose = hand ? M.pose : null; M.fxT -= dt;
+  switch (pose) {
+    case 'Closed_Fist': // ✊ curls up and sleeps on your knuckles
+      sxT = 1.12; syT = 0.82 + Math.sin(t * 1.6) * 0.03; eyeT = 0; tilt = 0.18; legAmt = -0.5; armL = armR = -0.1;
+      if (M.fxT < 0) { M.fxT = 1.3; emit(TX.z, M.x + size * 0.25, M.y - size * 0.9, 25, -size * 0.35, 2.2, size * 0.14); if (Math.random() < 0.4) sfx.snore(); }
+      break;
+    case 'Pointing_Up': // ☝️ balances on your fingertip and twirls
+      M.spin += dt * 5; spinY = M.spin; syT = 1.12; sxT = 0.95; armL = armR = 2.7; M.armZ[0] = 0.2; M.armZ[1] = -0.2; closedHappy = 0.6;
+      if (M.fxT < 0) { M.fxT = 0.12; emit(TX.spark, M.x + (Math.random() - 0.5) * size, M.y - Math.random() * size, (Math.random() - 0.5) * 60, -40, 0.8, size * 0.1); }
+      break;
+    case 'Thumb_Up': // 👍 dance party
+      bob = Math.abs(Math.sin(t * 6)) * size * 0.1; spinY = Math.sin(t * 4.5) * 0.4; tilt = Math.sin(t * 6) * 0.15;
+      armL = 1.6 + Math.sin(t * 9) * 0.9; armR = 1.6 + Math.sin(t * 9 + Math.PI) * 0.9; legAmt = 0.35; mouth = 0.6 + Math.sin(t * 12) * 0.3; closedHappy = 0.7;
+      if (M.fxT < 0) { M.fxT = 0.35; emit(Math.random() < 0.6 ? TX.note : TX.spark, M.x + (Math.random() - 0.5) * size, M.y - size * (0.7 + Math.random() * 0.4), (Math.random() - 0.5) * 60, -size * 0.5, 1.2, size * 0.16); sfx.note(); }
+      break;
+    case 'Victory': // ✌️ strikes a pose and winks (same as muse-pet)
+      armL = armR = 2.1; M.armZ[0] = 0.35; M.armZ[1] = -0.35; tilt = 0.3; mouth = 0.3; wink = smooth(0, 0.15, M.poseT);
+      if (M.poseT < 0.05) { emit(TX.spark, M.x + size * 0.3, M.y - size * 0.95, 0, -20, 0.7, size * 0.25); tone(2400, 1200, 0.06, 'square', 0.05); }
+      break;
+    case 'ILoveYou': // 🤟 hearts and a big blush
+      closedHappy = 1; blush = true; sxT = 1.08; syT = 0.95 + Math.sin(t * 5) * 0.03; armL = armR = 0.9; M.armZ[0] = 0.4; M.armZ[1] = -0.4;
+      if (M.fxT < 0) { M.fxT = 0.12; emit(TX.heart, M.x + (Math.random() - 0.5) * size * 1.2, M.y - size * (0.4 + Math.random() * 0.7), (Math.random() - 0.5) * 80, -size * (0.5 + Math.random() * 0.4), 1.6, size * (0.12 + Math.random() * 0.08)); }
+      break;
+    case 'Thumb_Down': // 👎 sad, with its own little rain cloud
+      syT = 0.9; sxT = 1.05; eyeT = 0.45; tilt = 0.12; armL = armR = -0.25;
+      if (!M.cloud || M.cloud.life <= 0) M.cloud = emit(TX.cloud, M.x, M.y - size * 1.35, 0, 0, 3, size * 0.7, { fade: false, sway: 0 });
+      M.cloud.x = damp(M.cloud.x, M.x, 8, dt); M.cloud.y = damp(M.cloud.y, M.y - size * 1.35, 8, dt); M.cloud.life = Math.max(M.cloud.life, 0.5); M.cloud.vx = M.cloud.vy = 0;
+      if (M.fxT < 0) { M.fxT = 0.07; emit(TX.drop, M.cloud.x + (Math.random() - 0.5) * size * 0.5, M.cloud.y + size * 0.15, 0, size * 1.6, 0.55, size * 0.07, { sway: 0 }); }
+      break;
+    case 'Open_Palm': // ✋ hops from fingertip to fingertip (index ↔ pinky); push your hand toward the camera to clap
+      M.clapCD -= dt; M.hopTimer -= dt;
+      if (M.hopTimer <= 0 && M.mode === 'hand' && M.cheerT <= 0) {
+        M.hopTimer = 0.7;
+        if (M.tipIdx + M.tipDir > 3 || M.tipIdx + M.tipDir < 0) M.tipDir *= -1; // bounce back at the ends
+        M.tipIdx += M.tipDir;
+        M.mode = 'hop'; M.hop = { t: 0, dur: 0.32, fx: M.x, fy: M.y }; tone(420 + M.tipIdx * 90, 760 + M.tipIdx * 120, 0.12, 'sine', 0.06);
+      }
+      if (M.mode === 'hop') { M.lean.t = -M.tipDir * 0.25; closedHappy = 0.5; }
+      if (M.poseT > 0.3) M.minSize = Math.min(M.minSize || hand.size, hand.size);
+      if (M.poseT > 0.3 && M.clapCD <= 0 && hand.size > M.minSize * 1.18) {
+        M.clapCD = 1.2; M.minSize = hand.size; M.jumpV = size * 2.6; M.cheerT = Math.max(M.cheerT, 0.8); M.hopTimer = 1.2;
+        tone(1900, 900, 0.05, 'square', 0.09); tone(1700, 800, 0.05, 'square', 0.07, 0.07);
+        for (let k = 0; k < 8; k++) emit(TX.heart, M.x + (Math.random() - 0.5) * size, M.y - size * (0.5 + Math.random() * 0.6), (Math.random() - 0.5) * 120, -size * (0.6 + Math.random() * 0.5), 1.5, size * (0.1 + Math.random() * 0.07));
+      }
+      break;
+    default: // no clear pose: sits on your hand, looks at you, waves now and then
+      M.nextWave -= dt; if (M.nextWave < 0) { M.waveT = 1.4; M.nextWave = 4 + Math.random() * 4; }
+      if (M.waveT > 0) { M.waveT -= dt; armL = 2.6; M.armZ[0] = Math.sin(t * 13) * 0.35; }
+  }
+  if (M.mode === 'hop') { armL = armR = 1.4; }
+  if (M.cheerT > 0) { // fireworks / clap: arms up, wide eyes, happy squint at the end
+    M.cheerT -= dt; armL = armR = 2.5; M.armZ[0] = Math.sin(t * 10) * 0.3; M.armZ[1] = -Math.sin(t * 10) * 0.3; mouth = 0.5; eyeT = 1.2; if (M.cheerT < 0.7) closedHappy = 1;
+  }
+  if (pose !== 'Thumb_Down' && M.cloud) { M.cloud.life = Math.min(M.cloud.life, 0.3); M.cloud = null; }
+  if (M.mode === 'fall') { armL = armR = 2.4; eyeT = 1.25; mouth = 0.5; }
+
+  // ---- little jumps (clap, fireworks) ----
+  M.jumpV -= size * 9 * dt; M.jumpY = Math.max(0, M.jumpY + M.jumpV * dt); if (M.jumpY === 0 && M.jumpV < 0) { if (M.jumpV < -size) M.sy.v -= 3; M.jumpV = 0; }
+  bob += M.jumpY;
+
+  // ---- springs ----
+  M.sx.t = sxT; M.sy.t = syT; M.arms[0].t = armL; M.arms[1].t = armR; M.eye.t = eyeT;
+  M.size.step(dt); M.sx.step(dt); M.sy.step(dt); M.lean.step(dt); M.arms.forEach(a => a.step(dt)); M.eye.step(dt);
+  M.mouth = damp(M.mouth, mouth, 10, dt);
+  if (pose !== 'Pointing_Up') M.spin = 0;
+  const lookAt = hand ? { x: W / 2, y: H * 0.3 } : { x: W / 2, y: H * 0.35 }; // you are behind the camera, so Muse looks out at you
+  M.look.x = damp(M.look.x, clamp((lookAt.x - M.x) / (size * 3), -1, 1), 4, dt); M.look.y = damp(M.look.y, clamp((lookAt.y - (M.y - size * 0.75)) / (size * 3), -1, 1), 4, dt);
+
+  // ---- apply ----
+  const sx = M.sx.x, sy = clamp(M.sy.x, 0.4, 1.6), sz = 1 / Math.sqrt(Math.max(0.2, sx * sy));
+  muse.position.set(M.x - W / 2, H / 2 - M.y + bob, 0);
+  muse.scale.set(size * sx, size * sy, size * sz);
+  muse.rotation.set(0, spinY, 0);
+  bodyRig.rotation.set(M.look.y * 0.1, 0, M.lean.x + tilt + Math.sin(t * 0.9) * 0.025);
+  arms.forEach((p, i) => { const s = i === 0 ? -1 : 1; p.rotation.z = s * (0.3 + clamp(M.arms[i].x, -0.3, 2.9) * 0.95) + M.armZ[i]; p.rotation.x = -clamp(M.arms[i].x, 0, 3) * 0.18; });
+  legs.forEach((l, i) => (l.rotation.x = M.mode === 'fall' || M.mode === 'hop' ? Math.sin(t * 12 + i * Math.PI) * 0.4 : legAmt < 0 ? legAmt : Math.sin(t * 6 + i * Math.PI) * legAmt));
+  if (t > M.nextBlink) { M.blinkT = 0.13; M.nextBlink = t + 2.5 + Math.random() * 3; }
+  M.blinkT = Math.max(0, M.blinkT - dt);
+  const open = clamp(M.eye.x, 0.03, 1.3) * (M.blinkT > 0 ? 0.08 : 1) * (1 - 0.85 * closedHappy);
+  const wide = eyeT > 1.1 ? 1.15 : 1;
+  eyes.forEach((e, i) => { e.scale.set(wide, Math.max(0.05, open * (i === 1 ? 1 - 0.9 * wink : 1)) * wide, 0.6); e.position.set(eyeBase[i].x + M.look.x * 0.02, eyeBase[i].y - M.look.y * 0.012, eyeBase[i].z); });
+  mouthO.scale.y = Math.max(0.0001, M.mouth * 0.018);
+  setBlush(blush);
+  FURU.uFeetY.value = H / 2 - M.y + bob; FURU.uScale.value = size * sy;
+  strandMeshes.forEach((m, i) => { m.material.uniforms.uLen.value = strandBase[i].len * size; m.material.uniforms.uWidth.value = strandBase[i].w * size / Math.sqrt(lod); });
+  shadow.position.set(M.x - W / 2, H / 2 - M.y + size * 0.01, -800); shadow.scale.set(size * 0.75 * sx, size * 0.75, 1); shadow.material.opacity = M.mode === 'hand' || M.mode === 'floor' ? 1 : 0.25;
+
+  updateSprites(dt, t); updateFireworks(dt, size);
+  if (!hand) { $('pose').classList.remove('on'); }
+  renderer.render(scene, camera);
+});
+
+</script>
+</body>
+</html>
