@@ -36,6 +36,8 @@ Mouse: drag to pet, click to poke, shift-drag to carry, double-click the floor t
 
 **Try it:** https://sophiamyang.github.io/muse-pet/ar.html (or open `ar.html` in Chrome). Click **Start camera**.
 
+![Muse, on your hand demo: Muse dancing on a raised finger over the webcam view, with the pose list on the left](ar-demo.gif)
+
 Your webcam becomes the screen and Muse sits on your hand, following it around. Hold a pose for about a third of a second; the pose name lights up at the top and in the list on the left.
 
 | Pose | Muse |
